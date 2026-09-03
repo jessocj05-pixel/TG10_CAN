@@ -1,6 +1,5 @@
 """
 witth remote frame
-added INTERNAL_100MHz_SEQUENCE , EXTERNALCLK_CLKIN_100MHz_SEQUENCE, run_sequence
 
 SY4000 CAN control via Waveshare USB-CAN-A (variable-length serial protocol).
 
@@ -105,7 +104,6 @@ def read_register(ser: serial.Serial, reg_id: int, subscribe: bool = False, wait
 
 
 # Example: "External Single In -> SYNC IN -> 10MHz" sequence
-
 INTERNAL_100MHz_SEQUENCE = [
     (0x10, bytes([0x00])),                          # Command = OFF
     (0x75, bytes([0x00])),                          # OscClkMux = Internal 100MHz
@@ -117,7 +115,7 @@ INTERNAL_100MHz_SEQUENCE = [
     (0x20, (5).to_bytes(4, "little")),             # Ratediv = 1000
     (0x10, bytes([0x01])),                          # Command = ON
 ]
-EXTERNALCLK_CLKIN_100MHz_SEQUENCE = [
+EXTERNALSINGLEIN_CLKIN_100MHz_SEQUENCE = [
     (0x10, bytes([0x00])),                          # Command = OFF
     (0x75, bytes([0x01])),                          # OscClkMux = exterenal
     (0x11, bytes([0x64])),                          # OscClock = 100--->change clk
@@ -130,17 +128,33 @@ EXTERNALCLK_CLKIN_100MHz_SEQUENCE = [
     (0x77, None),
     #(0x10, bytes([0x01])),                          # Command = ON
 ]
-SYNCIN_10MHZ_SEQUENCE = [
+EXTERNALSINGLEIN_SYNCIN_10MHZ_SEQUENCE = [
     (0x10, bytes([0x00])),                          # Command = OFF
     (0x75, bytes([0x00])),                          # OscClkMux = Internal 100MHz
     (0x11, bytes([0x64])),                          # OscClock = 100
     (0x12, (30).to_bytes(4, "little")),              # Ndiv = 30
     (0x6D, bytes([0x01])),                          # VCO2 freq = 3GHz
-    (0x55, bytes([0x03])),                          # MuxRateClk = SYNCIN
-    (0x54, bytes([0x00])),                          # MuxStartTrg = Rate divider
+    (0x55, bytes([0x01])),                          # MuxRateClk = SYNCIN
+    (0x54, bytes([0x01])),                          # MuxStartTrg = Rate divider
     (0x20, (100).to_bytes(4, "little")),             # Ratediv = 100
-    (0x10, bytes([0x01])),                          # Command = ON
+    #(0x10, bytes([0x01])),                          # Command = ON
 ]
+EXTERNALDUALIN_CLKIN_100MHZ_SYNCIN_20MHZ_SEQUENCE = [
+    (0x10, bytes([0x00])),                          # Command = OFF
+    (0x75, bytes([0x01])),                          # OscClkMux = Internal 100MHz
+    (0x11, bytes([0x64])),                          # OscClock = 100
+    (0x12, (30).to_bytes(4, "little")),              # Ndiv = 30
+    (0x6D, bytes([0x01])),                          # VCO2 freq = 3GHz
+    (0x55, bytes([0x03])),                          # MuxRateClk = SYNCIN
+    (0x54, bytes([0x01])),                          # MuxStartTrg = Rate divider
+    (0x20, (200).to_bytes(4, "little")),             # Ratediv = 100
+    #(0x10, bytes([0x01])),                          # Command = ON
+]
+
+FREQ_10KHZ = {
+    (0x20, (10000).to_bytes(4, "little")),
+}
+
 def run_sequence(ser, sequence):
     for reg_id, data in sequence:
         if data is None:
@@ -156,5 +170,9 @@ def run_sequence(ser, sequence):
 if __name__ == "__main__":
     with serial.Serial(PORT, BAUDRATE, timeout=TIMEOUT) as ser:
         print(f"Opened {PORT} at {BAUDRATE} baud")
-        #run_sequence(ser, SYNCIN_10MHZ_SEQUENCE)
-        run_sequence(ser,EXTERNALCLK_CLKIN_100MHz_SEQUENCE)
+        #run_sequence(ser, INTERNAL_100MHz_SEQUENCE)
+        #run_sequence(ser,EXTERNALSINGLEIN_CLKIN_100MHz_SEQUENCE)
+        #run_sequence(ser,EXTERNALSINGLEIN_SYNCIN_10MHZ_SEQUENCE)
+        time.sleep(1.00)
+        #run_sequence(ser,FREQ_10KHZ)
+        run_sequence(ser,EXTERNALDUALIN_CLKIN_100MHZ_SYNCIN_20MHZ_SEQUENCE)
