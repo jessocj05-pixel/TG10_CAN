@@ -150,6 +150,30 @@ EXTERNALDUALIN_CLKIN_100MHZ_SYNCIN_20MHZ_SEQUENCE = [
     (0x20, (200).to_bytes(4, "little")),             # Ratediv = 100
     #(0x10, bytes([0x01])),                          # Command = ON
 ]
+ONESHOT_TRIGGER_SOFTWARETRIG = [
+    (0x10, bytes([0x00])),                          # Command = OFF
+    (0x75, bytes([0x01])),                          # OscClkMux = Internal 100MHz
+    (0x11, bytes([0x64])),                          # OscClock = 100
+    (0x12, (30).to_bytes(4, "little")),              # Ndiv = 30
+    (0x6D, bytes([0x01])),                          # VCO2 freq = 3GHz
+    (0x55, bytes([0x00])),                          # MuxRateClk = SYNCIN
+    (0x54, bytes([0x04])),                          # MuxStartTrg = Rate divider
+    (0x20, (10).to_bytes(4, "little")),             # Ratediv = 100
+    (0X70, bytes([0X01])),
+    (0X70, bytes([0X00])),
+    #(0x10, bytes([0x01])),                          # Command = ON
+]
+ONESHOT_TRIGGER_SMARTTRIG= [
+    (0x10, bytes([0x00])),                          # Command = OFF
+    (0x75, bytes([0x00])),                          # OscClkMux = Internal 100MHz
+    (0x11, bytes([0x64])),                          # OscClock = 100
+    (0x12, (30).to_bytes(4, "little")),              # Ndiv = 30
+    (0x6D, bytes([0x01])),                          # VCO2 freq = 3GHz
+    (0x55, bytes([0x00])),                          # MuxRateClk = SYNCIN
+    (0x54, bytes([0x05])),                          # MuxStartTrg = Rate divider
+    (0x20, (200).to_bytes(4, "little")),             # Ratediv = 100
+    #(0x10, bytes([0x01])),                          # Command = ON
+]
 
 FREQ_10KHZ = {
     (0x20, (10000).to_bytes(4, "little")),
@@ -175,4 +199,6 @@ if __name__ == "__main__":
         #run_sequence(ser,EXTERNALSINGLEIN_SYNCIN_10MHZ_SEQUENCE)
         time.sleep(1.00)
         #run_sequence(ser,FREQ_10KHZ)
-        run_sequence(ser,EXTERNALDUALIN_CLKIN_100MHZ_SYNCIN_20MHZ_SEQUENCE)
+        #run_sequence(ser,EXTERNALDUALIN_CLKIN_100MHZ_SYNCIN_20MHZ_SEQUENCE)
+        run_sequence(ser,ONESHOT_TRIGGER_SOFTWARETRIG)
+        #run_sequence(ser,ONESHOT_TRIGGER_SMARTTRIG)
