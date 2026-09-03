@@ -61,7 +61,7 @@ CODE_WR_REQ= 0x18
 
 
 
-def make_id_nv(reg_id: int, priority=3, dest=DEST, code=CODE_WR_NV_REQ, source=SOURCE) -> int:
+def make_id_NV(reg_id: int, priority=3, dest=DEST, code=CODE_WR_NV_REQ, source=SOURCE) -> int:
     return (priority << 27) | (dest << 21) | (code << 14) | (source << 8) | reg_id
 
 def make_id(reg_id: int, priority=3, dest=DEST, code=CODE_WR_REQ, source=SOURCE) -> int:
@@ -92,6 +92,19 @@ INTERNAL_100MHz_SEQUENCE = [
     (0x10, bytes([0x01])),                          # Command = ON
 ]
 
+EXTERNALCLK_CLKIN_100MHz_SEQUENCE = [
+    (0x10, bytes([0x00])),                          # Command = OFF
+    (0x75, bytes([0x01])),                          # OscClkMux = exterenal
+    (0x11, bytes([0x64])),                          # OscClock = 100
+    (0x12, (30).to_bytes(4, "little")),              # Ndiv = 30
+    (0x6D, bytes([0x01])),                          # VCO2 freq = 3GHz
+    (0x55, bytes([0x01])),                          # MuxRateClk = external
+    (0x54, bytes([0x01])),                          # MuxStartTrg = Rate divider@optclk
+    (0x20, (1000).to_bytes(4, "little")),             # Ratediv = 1000
+    (0x76, None),
+    (0x77, None),
+    #(0x10, bytes([0x01])),                          # Command = ON
+]
 
 def run_sequence(ser: serial.Serial, sequence):
     for reg_id, data in sequence:
@@ -99,14 +112,17 @@ def run_sequence(ser: serial.Serial, sequence):
         send_frame(ser, can_id, data)
         read_echo(ser)
         time.sleep(0.05)   # small gap between frames, mirrors captured log timing
-
-run_off=[
+run_on=[
     (0x10, bytes([0x01]))
+]
+run_off=[
+    (0x10, bytes([0x00]))
 ]
 if __name__ == "__main__":
     with serial.Serial(PORT, BAUDRATE, timeout=TIMEOUT) as ser:
         print(f"Opened {PORT} at {BAUDRATE} baud")
        # run_sequence(ser, SYNCIN_10MHZ_SEQUENCE)
-        #run_sequence(ser,INTERNAL_100MHz_SEQUENCE)
+        run_sequence(ser,INTERNAL_100MHz_SEQUENCE)
         #time.sleep(0.10)
+        #run_sequence(ser,EXTERNALCLK_CLKIN_100MHz_SEQUENCE)
         run_sequence(ser,run_off)
