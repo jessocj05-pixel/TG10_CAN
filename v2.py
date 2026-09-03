@@ -1,4 +1,6 @@
 """
+witth remote frame
+
 SY4000 CAN control via Waveshare USB-CAN-A (variable-length serial protocol).
 
 Wire protocol (serial -> CAN), extended frames:
@@ -37,6 +39,26 @@ def send_frame(ser: serial.Serial, can_id: int, data: bytes):
     ser.write(pkt)
 
 
+def send_remote_frame(ser: serial.Serial, can_id: int, dlc: int = 0):
+    """
+    Send a CAN remote frame (RTR=1) -- used to request a register's current
+    value. Remote frames carry no data payload, only DLC (usually 0).
+    Per DocCanNet 'Trigger read register value request' (protocol doc p.6):
+        Code = cREQ (0x10)             -> plain read
+        Code = cNS + cREQ (0x50)       -> read AND subscribe to updates
+        DLC = 0, Data = none
+    """
+    pkt = build_frame(can_id, data=b"", extended=True, rtr=True)
+    # pad dlc bytes manually since build_frame derives DLC from len(data)==0;
+    # remote frames with DLC>0 (rare, usually 0) need the type byte's DLC bits set
+    if dlc:
+        type_byte = 0xC0 | 0x20 | 0x10 | dlc
+        id_bytes = can_id.to_bytes(4, byteorder="little")
+        pkt = bytes([0xAA, type_byte]) + id_bytes + bytes([0x55])
+    print(f"TX(RTR)  ID=0x{can_id:08X}  DLC={dlc}   raw={pkt.hex(' ')}")
+    ser.write(pkt)
+
+
 def read_echo(ser: serial.Serial, timeout=0.3):
     """Read back whatever the device sends (module's confirmation echo)."""
     time.sleep(timeout)
@@ -59,13 +81,26 @@ SOURCE = 0x3F
 CODE_WR_NV_REQ = 0x38
 CODE_WR_REQ= 0x18
 
+CODE_REQ = 0x10          # cREQ only -- plain read request
+CODE_REQ_SUBSCRIBE = 0x50  # cNS + cREQ -- read once, then module auto-reports updates
 
 
-def make_id_nv(reg_id: int, priority=3, dest=DEST, code=CODE_WR_NV_REQ, source=SOURCE) -> int:
+def make_id_NV(reg_id: int, priority=3, dest=DEST, code=CODE_WR_NV_REQ, source=SOURCE) -> int:
     return (priority << 27) | (dest << 21) | (code << 14) | (source << 8) | reg_id
 
 def make_id(reg_id: int, priority=3, dest=DEST, code=CODE_WR_REQ, source=SOURCE) -> int:
     return (priority << 27) | (dest << 21) | (code << 14) | (source << 8) | reg_id
+
+def read_register(ser: serial.Serial, reg_id: int, subscribe: bool = False, wait=0.3):
+    """
+    Send a remote (RTR) frame to request a register's current value.
+    subscribe=True also turns on periodic auto-report for that register
+    (per protocol: only read-only/report-capable registers support this).
+    """
+    code = CODE_REQ_SUBSCRIBE if subscribe else CODE_REQ
+    can_id = make_id(reg_id, code=code)
+    send_remote_frame(ser, can_id, dlc=0)
+    return read_echo(ser, timeout=wait)
 
 
 # Example: "External Single In -> SYNC IN -> 10MHz" sequence
@@ -80,33 +115,35 @@ SYNCIN_10MHZ_SEQUENCE = [
     (0x20, (100).to_bytes(4, "little")),             # Ratediv = 100
     (0x10, bytes([0x01])),                          # Command = ON
 ]
-INTERNAL_100MHz_SEQUENCE = [
+
+EXTERNALCLK_CLKIN_100MHz_SEQUENCE = [
     (0x10, bytes([0x00])),                          # Command = OFF
-    (0x75, bytes([0x00])),                          # OscClkMux = Internal 100MHz
+    (0x75, bytes([0x01])),                          # OscClkMux = exterenal
     (0x11, bytes([0x64])),                          # OscClock = 100
     (0x12, (30).to_bytes(4, "little")),              # Ndiv = 30
     (0x6D, bytes([0x01])),                          # VCO2 freq = 3GHz
-    (0x55, bytes([0x00])),                          # MuxRateClk = internal
-    (0x54, bytes([0x00])),                          # MuxStartTrg = Rate divider
-    (0x20, (5).to_bytes(4, "little")),             # Ratediv = 1000
-    (0x10, bytes([0x01])),                          # Command = ON
+    (0x55, bytes([0x01])),                          # MuxRateClk = external
+    (0x54, bytes([0x01])),                          # MuxStartTrg = Rate divider@optclk
+    (0x20, (100).to_bytes(4, "little")),             # Ratediv = 1000
+    (0x76, None),
+    (0x77, None),
+    #(0x10, bytes([0x01])),                          # Command = ON
 ]
 
-
-def run_sequence(ser: serial.Serial, sequence):
+def run_sequence(ser, sequence):
     for reg_id, data in sequence:
-        can_id = make_id(reg_id)
-        send_frame(ser, can_id, data)
+        if data is None:
+            can_id = make_id(reg_id, code=CODE_REQ)
+            send_remote_frame(ser, can_id, dlc=0)
+        else:
+            can_id = make_id(reg_id)
+            send_frame(ser, can_id, data)
         read_echo(ser)
-        time.sleep(0.05)   # small gap between frames, mirrors captured log timing
+        time.sleep(0.05)
 
-run_off=[
-    (0x10, bytes([0x01]))
-]
+
 if __name__ == "__main__":
     with serial.Serial(PORT, BAUDRATE, timeout=TIMEOUT) as ser:
         print(f"Opened {PORT} at {BAUDRATE} baud")
-       # run_sequence(ser, SYNCIN_10MHZ_SEQUENCE)
-        #run_sequence(ser,INTERNAL_100MHz_SEQUENCE)
-        #time.sleep(0.10)
-        run_sequence(ser,run_off)
+        #run_sequence(ser, SYNCIN_10MHZ_SEQUENCE)
+        run_sequence(ser,EXTERNALCLK_CLKIN_100MHz_SEQUENCE)
