@@ -111,7 +111,7 @@ run_off=[
 if __name__ == "__main__":
     with serial.Serial(PORT, BAUDRATE, timeout=TIMEOUT) as ser:
         print(f"Opened {PORT} at {BAUDRATE} baud")
-       # run_sequence(ser, SYNCIN_10MHZ_SEQUENCE)
-        run_sequence(ser,INTERNAL_100MHz_SEQUENCE)
+        run_sequence(ser, SYNCIN_10MHZ_SEQUENCE)
+        #run_sequence(ser,INTERNAL_100MHz_SEQUENCE)
         time.sleep(0.10)
         run_sequence(ser,run_off)
