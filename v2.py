@@ -112,7 +112,7 @@ INTERNAL_100MHz_SEQUENCE = [
     (0x6D, bytes([0x01])),                          # VCO2 freq = 3GHz
     (0x55, bytes([0x00])),                          # MuxRateClk = internal
     (0x54, bytes([0x00])),                          # MuxStartTrg = Rate divider
-    (0x20, (5).to_bytes(4, "little")),             # Ratediv = 1000
+    (0x20, (1000).to_bytes(4, "little")),             # Ratediv = 1000
     (0x10, bytes([0x01])),                          # Command = ON
 ]
 EXTERNALSINGLEIN_CLKIN_100MHz_SEQUENCE = [
@@ -165,8 +165,12 @@ ONESHOT_TRIGGER_SOFTWARETRIG = [
 ]
 ONESHOT_TRIGGER_SMARTTRIG= [
     (0x10, bytes([0x00])),                          # Command = OFF
-    (0x75, bytes([0x00])),                          # OscClkMux = Internal 100MHz
-    (0x11, bytes([0x64])),                          # OscClock = 100
+    (0x80, bytes([0x03])),                          # OscClkMux = Internal 100MHz
+    (0x5D, bytes([0x04])),                          # OscClock = 100
+    (0x56, bytes([0x00]))
+    (0x26, bytes([0x20]))
+    (0x2E, bytes([0x03]))
+
     (0x12, (30).to_bytes(4, "little")),              # Ndiv = 30
     (0x6D, bytes([0x01])),                          # VCO2 freq = 3GHz
     (0x55, bytes([0x00])),                          # MuxRateClk = SYNCIN
@@ -175,10 +179,63 @@ ONESHOT_TRIGGER_SMARTTRIG= [
     #(0x10, bytes([0x01])),                          # Command = ON
 ]
 
-FREQ_10KHZ = {
+FREQ_10KHZ = [
     (0x20, (10000).to_bytes(4, "little")),
-}
+]
 
+PRESET1_CHANNEL_SEQUENCE = [
+    (0x80, (3).to_bytes(4, "little")),              # DelayCnt0 = 3
+    (0x16, (4).to_bytes(4, "little")),              # DelayCnt1 = 4
+    (0x19, (35).to_bytes(4, "little")),             # DelayCnt2 = 35
+    (0x1A, (67).to_bytes(4, "little")),             # DelayCnt3 = 67
+    (0x1B, (93).to_bytes(4, "little")),             # DelayCnt4 = 93
+    (0x1C, (3).to_bytes(4, "little")),              # DelayCnt5 = 3
+    (0x1D, (3).to_bytes(4, "little")),              # DelayCnt6 = 3
+    (0x1E, (3).to_bytes(4, "little")),              # DelayCnt7 = 3
+
+    (0x26, (32).to_bytes(2, "little")),             # PostCnt0 = 32
+    (0x27, (11).to_bytes(2, "little")),             # PostCnt1 = 11
+    (0x28, (32).to_bytes(2, "little")),             # PostCnt2 = 32
+    (0x29, (32).to_bytes(2, "little")),             # PostCnt3 = 32
+    (0x2A, (30).to_bytes(2, "little")),             # PostCnt4 = 30
+    (0x2B, (54).to_bytes(2, "little")),             # PostCnt5 = 54
+    (0x2C, (64).to_bytes(2, "little")),             # PostCnt6 = 64
+    (0x2D, (75).to_bytes(2, "little")),             # PostCnt7 = 75
+
+    (0x2E, bytes([0x03])),                          # MuxSetConf10 = 3
+    (0x2F, bytes([0x03])),                          # MuxSetConf20 = 3
+    (0x30, bytes([0x02])),                          # MuxResConf10 = 2
+    (0x31, bytes([0x02])),                          # MuxResConf20 = 2
+
+    (0x56, bytes([0x00])),                          # Adly0 = 0
+    (0x57, bytes([0x0d])),                          # Adly1 = 13
+    (0x58, bytes([0x00])),                          # Adly2 = 0
+    (0x59, bytes([0x00])),                          # Adly3 = 0
+    (0x5A, bytes([0x00])),                          # Adly4 = 0
+    (0x5B, bytes([0x01])),                          # Adly5 = 1
+    (0x5C, bytes([0x01])),                          # Adly6 = 1
+
+    (0x5D, bytes([0x04])),                          # Ddly0 = 4
+    (0x5E, bytes([0x05])),                          # Ddly1 = 5
+    (0x5F, bytes([0x08])),                          # Ddly2 = 8
+    (0x60, bytes([0x0c])),                          # Ddly3 = 12
+    (0x62, bytes([0x04])),                          # Ddly5 = 4
+    (0x63, bytes([0x04])),                          # Ddly6 = 4
+]
+
+CONFIG_NORMAL_SEQUENCE = [
+    (0x52, bytes([0x01])),                          # MuxConfSw = 1
+]
+
+CONFIG_GATE_GATE_SEQUENCE = [
+    (0x52, bytes([0x05])),                          # MuxConfSw = GATE
+]
+CONFIG_N_GATE_SEQUENCE = [
+    (0x52, bytes([0x06])),                          # MuxConfSw = GATE
+]
+CONFIG_FREQ_DIV_100_SEQUENCE = [
+    (0x52, bytes([0x04])),                          # MuxConfSw = F div
+]
 def run_sequence(ser, sequence):
     for reg_id, data in sequence:
         if data is None:
@@ -200,5 +257,10 @@ if __name__ == "__main__":
         time.sleep(1.00)
         #run_sequence(ser,FREQ_10KHZ)
         #run_sequence(ser,EXTERNALDUALIN_CLKIN_100MHZ_SYNCIN_20MHZ_SEQUENCE)
-        run_sequence(ser,ONESHOT_TRIGGER_SOFTWARETRIG)
+        #run_sequence(ser,ONESHOT_TRIGGER_SOFTWARETRIG)
         #run_sequence(ser,ONESHOT_TRIGGER_SMARTTRIG)
+        run_sequence(ser,PRESET1_CHANNEL_SEQUENCE)
+        run_sequence(ser, CONFIG_NORMAL_SEQUENCE)
+        run_sequence(ser, CONFIG_GATE_GATE_SEQUENCE)
+        run_sequence(ser,CONFIG_N_GATE_SEQUENCE)
+        run_sequence(ser, CONFIG_FREQ_DIV_100_SEQUENCE)
