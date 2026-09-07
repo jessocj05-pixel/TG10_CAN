@@ -12,6 +12,7 @@ Wire protocol (serial -> CAN), extended frames:
 import serial
 import time
 from registers import describe_write
+
 PORT = "COM21"          # change to your adapter's port, e.g. "/dev/ttyUSB0" on Linux
 BAUDRATE = 2000000      # adapter's serial baud (check your adapter config, common default)
 TIMEOUT = 0.5
@@ -247,7 +248,7 @@ DELAY_PRESET_DEL = [                                #to change delay preset del0
     (0x5D, bytes([0x04])),                           #Ddelay0
     (0x56, bytes([0x01])),                           #Adelay0
     #DEL1
-    (0x16, (3).to_bytes(4, "little")),               #DELCNT1
+    (0x16, (11).to_bytes(4, "little")),               #DELCNT1
     (0x5E, bytes([0x04])),                           #Ddelay1
     (0x57, bytes([0x01])),                           #Adelay1
     #DEL2
@@ -282,6 +283,14 @@ POSTDELAY_PRESET_POSTDEL = [
     (0x2B, (54).to_bytes(2, "little")),             #PostCnt5
     (0x2C, (64).to_bytes(2, "little")),             #PostCnt6
     (0x2D, (75).to_bytes(2, "little")),             #PostCnt7
+]
+
+OUT0_CONFIG2_DEL0_DEL1 = [
+    (0x10, bytes([0x00])),#COMMAND -OFF
+    (0x2E, bytes([0x00])),#MUXSETCONFIG10->CONFIG1 RISEDELAY-->NC
+    (0x30, bytes([0x00])),#MUXRESCONFIG10->CONFIG1 FALLDELAY-->NC
+    (0x2F, bytes([0x03])),#MUXSETCONFIG20->CONFIG2 RISEDELAY-->del0
+    (0x31, bytes([0x04])),#MUXRESCONFIG20->CONFIG2 FALLDELAY-->del1
 ]
 
 
@@ -322,4 +331,5 @@ if __name__ == "__main__":
         # run_sequence(ser,CONFIG_N_GATE_SEQUENCE)
         # run_sequence(ser, CONFIG_FREQ_DIV_100_SEQUENCE)
         run_sequence(ser, DELAY_PRESET_DEL)
-        run_sequence(ser, POSTDELAY_PRESET_POSTDEL)
+        # run_sequence(ser, POSTDELAY_PRESET_POSTDEL)
+        run_sequence(ser, OUT0_CONFIG2_DEL0_DEL1)
