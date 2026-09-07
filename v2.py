@@ -11,8 +11,8 @@ Wire protocol (serial -> CAN), extended frames:
 
 import serial
 import time
-
-PORT = "COM22"          # change to your adapter's port, e.g. "/dev/ttyUSB0" on Linux
+from registers import describe_write
+PORT = "COM21"          # change to your adapter's port, e.g. "/dev/ttyUSB0" on Linux
 BAUDRATE = 2000000      # adapter's serial baud (check your adapter config, common default)
 TIMEOUT = 0.5
 
@@ -167,9 +167,9 @@ ONESHOT_TRIGGER_SMARTTRIG= [
     (0x10, bytes([0x00])),                          # Command = OFF
     (0x80, bytes([0x03])),                          # OscClkMux = Internal 100MHz
     (0x5D, bytes([0x04])),                          # OscClock = 100
-    (0x56, bytes([0x00]))
-    (0x26, bytes([0x20]))
-    (0x2E, bytes([0x03]))
+    (0x56, bytes([0x00])),
+    (0x26, bytes([0x20])),
+    (0x2E, bytes([0x03])),
 
     (0x12, (30).to_bytes(4, "little")),              # Ndiv = 30
     (0x6D, bytes([0x01])),                          # VCO2 freq = 3GHz
@@ -247,20 +247,25 @@ def run_sequence(ser, sequence):
         read_echo(ser)
         time.sleep(0.05)
 
+def describewrite(sequence):
+    for reg_id, data in sequence:
+        print(describe_write(reg_id, data))
 
 if __name__ == "__main__":
     with serial.Serial(PORT, BAUDRATE, timeout=TIMEOUT) as ser:
         print(f"Opened {PORT} at {BAUDRATE} baud")
         #run_sequence(ser, INTERNAL_100MHz_SEQUENCE)
-        #run_sequence(ser,EXTERNALSINGLEIN_CLKIN_100MHz_SEQUENCE)
+        run_sequence(ser,EXTERNALSINGLEIN_CLKIN_100MHz_SEQUENCE)
         #run_sequence(ser,EXTERNALSINGLEIN_SYNCIN_10MHZ_SEQUENCE)
         time.sleep(1.00)
         #run_sequence(ser,FREQ_10KHZ)
         #run_sequence(ser,EXTERNALDUALIN_CLKIN_100MHZ_SYNCIN_20MHZ_SEQUENCE)
         #run_sequence(ser,ONESHOT_TRIGGER_SOFTWARETRIG)
         #run_sequence(ser,ONESHOT_TRIGGER_SMARTTRIG)
-        run_sequence(ser,PRESET1_CHANNEL_SEQUENCE)
-        run_sequence(ser, CONFIG_NORMAL_SEQUENCE)
-        run_sequence(ser, CONFIG_GATE_GATE_SEQUENCE)
-        run_sequence(ser,CONFIG_N_GATE_SEQUENCE)
-        run_sequence(ser, CONFIG_FREQ_DIV_100_SEQUENCE)
+        #run_sequence(ser,PRESET1_CHANNEL_SEQUENCE)
+        describewrite(EXTERNALSINGLEIN_CLKIN_100MHz_SEQUENCE)
+        
+        # run_sequence(ser, CONFIG_NORMAL_SEQUENCE)
+        # run_sequence(ser, CONFIG_GATE_GATE_SEQUENCE)
+        # run_sequence(ser,CONFIG_N_GATE_SEQUENCE)
+        # run_sequence(ser, CONFIG_FREQ_DIV_100_SEQUENCE)

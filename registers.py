@@ -120,3 +120,32 @@ REGS = {
     134: ("AWGdivmux", "u8", 1, {0: "/1", 1: "/2", 2: "/4", 3: "/8"}),
 }
 
+# REGISTERS = {info[0]: reg_id for reg_id, info in REGS.items()}
+
+# print(REGISTERS["Command"])
+# print(REGS[0x10])
+def describe_write(reg_id: int,data:bytes)->str:
+    """
+    convert(reg_id,data) to readdable strings
+    eg  suppose:
+        describe_write(0x10, bytes([0x00]))    -> "command = off"
+        print(describe_write(0x20, (1000).to_bytes(4, "little")))    ->ratediv=1000
+    
+    to call in seq you can use this
+    for reg_id,data in seq:
+        print(describe_write(reg,id,data))
+    """
+    if reg_id not in REGS:
+        return f"UnknownRegister(0x{reg_id:02X})={data.hex()}"
+    name, typ, size, enum = REGS[reg_id]
+
+    if data is None:
+        return f"{name} = <READ>"
+    #convert data bytes back to integer
+    value = int.from_bytes(data,byteorder="little")
+
+    if enum is not None:
+        meaning = enum.get(value, f"Unknown({value})")
+        return f"{name} = {meaning}"
+    else:
+        return f"{name} = {value}"
