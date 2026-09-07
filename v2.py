@@ -134,9 +134,9 @@ EXTERNALSINGLEIN_SYNCIN_10MHZ_SEQUENCE = [
     (0x11, bytes([0x64])),                          # OscClock = 100
     (0x12, (30).to_bytes(4, "little")),              # Ndiv = 30
     (0x6D, bytes([0x01])),                          # VCO2 freq = 3GHz
-    (0x55, bytes([0x01])),                          # MuxRateClk = SYNCIN
-    (0x54, bytes([0x01])),                          # MuxStartTrg = Rate divider
-    (0x20, (100).to_bytes(4, "little")),             # Ratediv = 100
+    (0x55, bytes([0x03])),                          # MuxRateClk = SYNCIN
+    (0x54, bytes([0x00])),                          # MuxStartTrg = Rate divider
+    (0x20, (10).to_bytes(4, "little")),             # Ratediv = 100
     #(0x10, bytes([0x01])),                          # Command = ON
 ]
 EXTERNALDUALIN_CLKIN_100MHZ_SYNCIN_20MHZ_SEQUENCE = [
@@ -167,6 +167,9 @@ ONESHOT_TRIGGER_SMARTTRIG= [
     (0x10, bytes([0x00])),                          # Command = OFF
     (0x80, bytes([0x03])),                          # OscClkMux = Internal 100MHz
     (0x5D, bytes([0x04])),                          # OscClock = 100
+    (0x56, bytes([0x00])),
+    (0x26, bytes([0x20])),
+    (0x2E, bytes([0x03])),
     (0x56, bytes([0x00])),
     (0x26, bytes([0x20])),
     (0x2E, bytes([0x03])),
@@ -235,6 +238,7 @@ CONFIG_N_GATE_SEQUENCE = [
 ]
 CONFIG_FREQ_DIV_100_SEQUENCE = [
     (0x52, bytes([0x04])),                          # MuxConfSw = F div
+    (0x69, (1).to_bytes(4, "little")),
 ]
 def run_sequence(ser, sequence):
     for reg_id, data in sequence:
