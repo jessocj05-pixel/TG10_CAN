@@ -1,6 +1,6 @@
 """
-witth remote frame
-
+-------------witth remote frame
+-------------working code with manual
 SY4000 CAN control via Waveshare USB-CAN-A (variable-length serial protocol).
 
 Wire protocol (serial -> CAN), extended frames:
