@@ -149,3 +149,4 @@ def describe_write(reg_id: int,data:bytes)->str:
         return f"{name} = {meaning}"
     else:
         return f"{name} = {value}"
+

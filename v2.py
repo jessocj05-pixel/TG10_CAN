@@ -233,6 +233,7 @@ CONFIG_NORMAL_SEQUENCE = [
 CONFIG_GATE_GATE_SEQUENCE = [
     (0x52, bytes([0x05])),                          # MuxConfSw = GATE
 ]
+
 CONFIG_N_GATE_SEQUENCE = [
     (0x52, bytes([0x06])),                          # MuxConfSw = GATE
 ]
@@ -240,6 +241,50 @@ CONFIG_FREQ_DIV_100_SEQUENCE = [
     (0x52, bytes([0x04])),                          # MuxConfSw = F div
     (0x69, (1).to_bytes(4, "little")),
 ]
+DELAY_PRESET_DEL = [                                #to change delay preset del0
+    #DEL0
+    (0x80, (3).to_bytes(4, "little")),               #DELCNT0
+    (0x5D, bytes([0x04])),                           #Ddelay0
+    (0x56, bytes([0x01])),                           #Adelay0
+    #DEL1
+    (0x16, (3).to_bytes(4, "little")),               #DELCNT1
+    (0x5E, bytes([0x04])),                           #Ddelay1
+    (0x57, bytes([0x01])),                           #Adelay1
+    #DEL2
+    (0x19, (3).to_bytes(4, "little")),               #DELCNT2
+    (0x5F, bytes([0x04])),                           #Ddelay2
+    (0x58, bytes([0x01])),                           #Adelay2
+    #DEL3
+    (0x1A, (3).to_bytes(4, "little")),               #DELCNT3
+    (0x60, bytes([0x04])),                           #Ddelay3
+    (0x59, bytes([0x01])),                           #Adelay3
+    #DEL4
+    (0x1B, (3).to_bytes(4, "little")),               #DELCNT4
+    (0x5A, bytes([0x04])),                           #Adelay4
+    #DEL5
+    (0x1C, (3).to_bytes(4, "little")),               #DELCNT5
+    (0x62, bytes([0x04])),                           #Ddelay5
+    (0x5B, bytes([0x01])),                           #Adelay5
+    #DEL6
+    (0x1D, (3).to_bytes(4, "little")),               #DELCNT6
+    (0x63, bytes([0x04])),                           #Ddelay6
+    (0x5C, bytes([0x01])),                           #Adelay6
+    #DEL7
+    (0x1E, (3).to_bytes(4, "little")),               #DELCNT7
+]
+
+POSTDELAY_PRESET_POSTDEL = [
+    (0x26, (258).to_bytes(2, "little")),            #PostCnt0          
+    (0x27, (11).to_bytes(2, "little")),             #PostCnt1
+    (0x28, (21).to_bytes(2, "little")),             #PostCnt2
+    (0x29, (32).to_bytes(2, "little")),             #PostCnt3
+    (0x2A, (40).to_bytes(2, "little")),             #PostCnt4
+    (0x2B, (54).to_bytes(2, "little")),             #PostCnt5
+    (0x2C, (64).to_bytes(2, "little")),             #PostCnt6
+    (0x2D, (75).to_bytes(2, "little")),             #PostCnt7
+]
+
+
 def run_sequence(ser, sequence):
     for reg_id, data in sequence:
         if data is None:
@@ -250,6 +295,9 @@ def run_sequence(ser, sequence):
             send_frame(ser, can_id, data)
         read_echo(ser)
         time.sleep(0.05)
+    print("\n")
+    describewrite(sequence)
+    print("\n")
 
 def describewrite(sequence):
     for reg_id, data in sequence:
@@ -259,7 +307,7 @@ if __name__ == "__main__":
     with serial.Serial(PORT, BAUDRATE, timeout=TIMEOUT) as ser:
         print(f"Opened {PORT} at {BAUDRATE} baud")
         #run_sequence(ser, INTERNAL_100MHz_SEQUENCE)
-        run_sequence(ser,EXTERNALSINGLEIN_CLKIN_100MHz_SEQUENCE)
+        # run_sequence(ser,EXTERNALSINGLEIN_CLKIN_100MHz_SEQUENCE)
         #run_sequence(ser,EXTERNALSINGLEIN_SYNCIN_10MHZ_SEQUENCE)
         time.sleep(1.00)
         #run_sequence(ser,FREQ_10KHZ)
@@ -267,9 +315,11 @@ if __name__ == "__main__":
         #run_sequence(ser,ONESHOT_TRIGGER_SOFTWARETRIG)
         #run_sequence(ser,ONESHOT_TRIGGER_SMARTTRIG)
         #run_sequence(ser,PRESET1_CHANNEL_SEQUENCE)
-        describewrite(EXTERNALSINGLEIN_CLKIN_100MHz_SEQUENCE)
+        # describewrite(EXTERNALSINGLEIN_CLKIN_100MHz_SEQUENCE)
         
         # run_sequence(ser, CONFIG_NORMAL_SEQUENCE)
         # run_sequence(ser, CONFIG_GATE_GATE_SEQUENCE)
         # run_sequence(ser,CONFIG_N_GATE_SEQUENCE)
         # run_sequence(ser, CONFIG_FREQ_DIV_100_SEQUENCE)
+        run_sequence(ser, DELAY_PRESET_DEL)
+        run_sequence(ser, POSTDELAY_PRESET_POSTDEL)
