@@ -333,3 +333,4 @@ if __name__ == "__main__":
         run_sequence(ser, DELAY_PRESET_DEL)
         # run_sequence(ser, POSTDELAY_PRESET_POSTDEL)
         run_sequence(ser, OUT0_CONFIG2_DEL0_DEL1)
+        run_sequence(ser,out)

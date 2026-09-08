@@ -12,7 +12,6 @@ Wire protocol (serial -> CAN), extended frames:
 import serial
 import time
 from registers import describe_write
-from calculations import calc_delay_registers,calc_pll2_ndiv ,calc_post_delay_counter,calc_ratediv
 
 PORT = "COM21"          # change to your adapter's port, e.g. "/dev/ttyUSB0" on Linux
 BAUDRATE = 2000000      # adapter's serial baud (check your adapter config, common default)
@@ -130,17 +129,24 @@ EXTERNALSINGLEIN_CLKIN_100MHz_SEQUENCE = [
     (0x77, None),
     #(0x10, bytes([0x01])),                          # Command = ON
 ]
+# befor run give the sync of desired value then only it work 
+# freq given 5Mhz               freq = 5000000/10 = 5,00,000(500Khz)
+# freq given 5Mhz               freq = 10000000/10 = 10,00,000()
+# freq given 5Mhz               freq = 20000000/10 = 20,00,000()
 EXTERNALSINGLEIN_SYNCIN_10MHZ_SEQUENCE = [
     (0x10, bytes([0x00])),                          # Command = OFF
     (0x75, bytes([0x00])),                          # OscClkMux = Internal 100MHz
     (0x11, bytes([0x64])),                          # OscClock = 100
     (0x12, (30).to_bytes(4, "little")),              # Ndiv = 30
-    (0x6D, bytes([0x01])),                          # VCO2 freq = 3GHz
+    (0x6D, bytes([0x01])),                           # VCO2 freq = 3GHz
+    (0x20, (2).to_bytes(4, "little")),             #  output frequency depend on syncin freq freq = syncin / ratedivide
     (0x55, bytes([0x03])),                          # MuxRateClk = SYNCIN
     (0x54, bytes([0x00])),                          # MuxStartTrg = Rate divider
-    (0x20, (10).to_bytes(4, "little")),             # Ratediv = 100
-    #(0x10, bytes([0x01])),                          # Command = ON
+    # (0x20, (100).to_bytes(4, "little")),             # Ratediv = 100
+    (0x10, bytes([0x01])),                          # Command = ON
+
 ]
+
 EXTERNALDUALIN_CLKIN_100MHZ_SYNCIN_20MHZ_SEQUENCE = [
     (0x10, bytes([0x00])),                          # Command = OFF
     (0x75, bytes([0x01])),                          # OscClkMux = Internal 100MHz
@@ -245,34 +251,34 @@ CONFIG_FREQ_DIV_100_SEQUENCE = [
 ]
 DELAY_PRESET_DEL = [                                #to change delay preset del0
     #DEL0
-    (0x80, (3).to_bytes(4, "little")),               #DELCNT0
+    (0x80, (5).to_bytes(4, "little")),               #DELCNT0
     (0x5D, bytes([0x04])),                           #Ddelay0
     (0x56, bytes([0x01])),                           #Adelay0
     #DEL1
-    (0x16, (11).to_bytes(4, "little")),               #DELCNT1
+    (0x16, (22).to_bytes(4, "little")),               #DELCNT1
     (0x5E, bytes([0x04])),                           #Ddelay1
     (0x57, bytes([0x01])),                           #Adelay1
     #DEL2
-    (0x19, (3).to_bytes(4, "little")),               #DELCNT2
-    (0x5F, bytes([0x04])),                           #Ddelay2
-    (0x58, bytes([0x01])),                           #Adelay2
-    #DEL3
-    (0x1A, (3).to_bytes(4, "little")),               #DELCNT3
-    (0x60, bytes([0x04])),                           #Ddelay3
-    (0x59, bytes([0x01])),                           #Adelay3
-    #DEL4
-    (0x1B, (3).to_bytes(4, "little")),               #DELCNT4
-    (0x5A, bytes([0x04])),                           #Adelay4
-    #DEL5
-    (0x1C, (3).to_bytes(4, "little")),               #DELCNT5
-    (0x62, bytes([0x04])),                           #Ddelay5
-    (0x5B, bytes([0x01])),                           #Adelay5
-    #DEL6
-    (0x1D, (3).to_bytes(4, "little")),               #DELCNT6
-    (0x63, bytes([0x04])),                           #Ddelay6
-    (0x5C, bytes([0x01])),                           #Adelay6
-    #DEL7
-    (0x1E, (3).to_bytes(4, "little")),               #DELCNT7
+    # (0x19, (22).to_bytes(4, "little")),               #DELCNT2
+    # (0x5F, bytes([0x04])),                           #Ddelay2
+    # (0x58, bytes([0x01])),                           #Adelay2
+    # #DEL3
+    # (0x1A, (3).to_bytes(4, "little")),               #DELCNT3
+    # (0x60, bytes([0x04])),                           #Ddelay3
+    # (0x59, bytes([0x01])),                           #Adelay3
+    # #DEL4
+    # (0x1B, (3).to_bytes(4, "little")),               #DELCNT4
+    # (0x5A, bytes([0x04])),                           #Adelay4
+    # #DEL5
+    # (0x1C, (3).to_bytes(4, "little")),               #DELCNT5
+    # (0x62, bytes([0x04])),                           #Ddelay5
+    # (0x5B, bytes([0x01])),                           #Adelay5
+    # #DEL6
+    # (0x1D, (3).to_bytes(4, "little")),               #DELCNT6
+    # (0x63, bytes([0x04])),                           #Ddelay6
+    # (0x5C, bytes([0x01])),                           #Adelay6
+    # #DEL7
+    # (0x1E, (3).to_bytes(4, "little")),               #DELCNT7
 ]
 
 POSTDELAY_PRESET_POSTDEL = [
@@ -292,6 +298,7 @@ OUT0_CONFIG2_DEL0_DEL1 = [
     (0x30, bytes([0x00])),#MUXRESCONFIG10->CONFIG1 FALLDELAY-->NC
     (0x2F, bytes([0x03])),#MUXSETCONFIG20->CONFIG2 RISEDELAY-->del0
     (0x31, bytes([0x04])),#MUXRESCONFIG20->CONFIG2 FALLDELAY-->del1
+    (0x10, bytes([0x01])),#COMMAND -OFF
 ]
 OUT1_CONFIG2_DEL0_DEL1 = [
     (0x10, bytes([0x00])),#COMMAND -OFF
@@ -307,6 +314,7 @@ OUT2_CONFIG2_DEL0_DEL1 = [
     (0x37, bytes([0x03])),#MUXSETCONFIG23->CONFIG2 RISEDELAY-->del0
     (0x39, bytes([0x04])),#MUXRESCONFIG23->CONFIG2 FALLDELAY-->del1
     (0x7A, bytes([0x00])),#LOGIC OUT
+    (0x10, bytes([0x01])),#COMMAND -OFF
 ]
 OUT3_CONFIG2_DEL0_DEL1 = [
     (0x10, bytes([0x00])),#COMMAND -OFF
@@ -362,6 +370,9 @@ OUT_COMT_OPTCLK= [
     (0x4E, bytes([0x08])),#muxTrig1OUT->TRIGGERSOURCE->OPTCLK
     
 ]
+RUN_ON = [
+    (0x10, bytes([0x01])),
+]
 def run_check_out():
     run_sequence(ser , OUT0_CONFIG2_DEL0_DEL1)
     time.sleep(1.00)
@@ -411,8 +422,8 @@ if __name__ == "__main__":
     with serial.Serial(PORT, BAUDRATE, timeout=TIMEOUT) as ser:
         print(f"Opened {PORT} at {BAUDRATE} baud")
         #run_sequence(ser, INTERNAL_100MHz_SEQUENCE)
-        # run_sequence(ser,EXTERNALSINGLEIN_CLKIN_100MHz_SEQUENCE)
-        #run_sequence(ser,EXTERNALSINGLEIN_SYNCIN_10MHZ_SEQUENCE)
+        #run_sequence(ser,EXTERNALSINGLEIN_CLKIN_100MHz_SEQUENCE)
+        run_sequence(ser,EXTERNALSINGLEIN_SYNCIN_10MHZ_SEQUENCE)
         time.sleep(1.00)
         #run_sequence(ser,FREQ_10KHZ)
         #run_sequence(ser,EXTERNALDUALIN_CLKIN_100MHZ_SYNCIN_20MHZ_SEQUENCE)
@@ -428,5 +439,7 @@ if __name__ == "__main__":
         #run_sequence(ser, DELAY_PRESET_DEL)
         # run_sequence(ser, POSTDELAY_PRESET_POSTDEL)
         #run_sequence(ser, OUT0_CONFIG2_DEL0_DEL1)
-        run_check_out()
-        
+        #run_sequence(ser, OUT2_CONFIG2_DEL0_DEL1)
+        #run_sequence(ser,RUN_ON)
+        #run_check_out()
+     
