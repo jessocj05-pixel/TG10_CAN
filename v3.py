@@ -116,24 +116,35 @@ INTERNAL_100MHz_SEQUENCE = [
     (0x20, (1000).to_bytes(4, "little")),             # Ratediv = 1000
     (0x10, bytes([0x01])),                          # Command = ON
 ]
+"""
+0x11 fsystem = n * oscclk
+                30 * 100->3GHz
+    
+    Oscillator clock    (0x64)-->>>>0x11
+
+
+    0x0A -> 10Mhz 
+"""
 EXTERNALSINGLEIN_CLKIN_100MHz_SEQUENCE = [
     (0x10, bytes([0x00])),                          # Command = OFF
     (0x75, bytes([0x01])),                          # OscClkMux = exterenal
+    # (0x11, bytes([0x0A])),                          # OscClock = 100--->change clk
     (0x11, bytes([0x64])),                          # OscClock = 100--->change clk
     (0x12, (30).to_bytes(4, "little")),              # Ndiv = 30
     (0x6D, bytes([0x01])),                          # VCO2 freq = 3GHz
     (0x55, bytes([0x01])),                          # MuxRateClk = external
     (0x54, bytes([0x01])),                          # MuxStartTrg = Rate divider@optclk
-    (0x20, (100).to_bytes(4, "little")),             # Ratediv = 1000 -->set freq
+    (0x20, (1).to_bytes(4, "little")),             # Ratediv = 1000 -->set freq
     (0x76, None),
     (0x77, None),
     #(0x10, bytes([0x01])),                          # Command = ON
 ]
+
 # befor run give the sync of desired value then only it work 
 # freq given 5Mhz               freq = 5000000/10 = 5,00,000(500Khz)
 # freq given 5Mhz               freq = 10000000/10 = 10,00,000()
 # freq given 5Mhz               freq = 20000000/10 = 20,00,000()
-EXTERNALSINGLEIN_SYNCIN_10MHZ_SEQUENCE = [
+EXTERNALSINGLEIN_SYNCIN_SEQUENCE = [
     (0x10, bytes([0x00])),                          # Command = OFF
     (0x75, bytes([0x00])),                          # OscClkMux = Internal 100MHz
     (0x11, bytes([0x64])),                          # OscClock = 100
@@ -172,6 +183,7 @@ ONESHOT_TRIGGER_SOFTWARETRIG = [
     #(0x10, bytes([0x01])),                          # Command = ON
 ]
 ONESHOT_TRIGGER_SMARTTRIG= [
+
     (0x10, bytes([0x00])),                          # Command = OFF
     (0x80, bytes([0x03])),                          # OscClkMux = Internal 100MHz
     (0x5D, bytes([0x04])),                          # OscClock = 100
@@ -191,7 +203,7 @@ ONESHOT_TRIGGER_SMARTTRIG= [
 ]
 
 FREQ_10KHZ = [
-    (0x20, (10000).to_bytes(4, "little")),
+    (0x20, (100).to_bytes(4, "little")),
 ]
 
 PRESET1_CHANNEL_SEQUENCE = [
@@ -232,6 +244,7 @@ PRESET1_CHANNEL_SEQUENCE = [
     (0x60, bytes([0x0c])),                          # Ddly3 = 12
     (0x62, bytes([0x04])),                          # Ddly5 = 4
     (0x63, bytes([0x04])),                          # Ddly6 = 4
+
 ]
 
 CONFIG_NORMAL_SEQUENCE = [
@@ -244,7 +257,34 @@ CONFIG_GATE_GATE_SEQUENCE = [
 
 CONFIG_N_GATE_SEQUENCE = [
     (0x52, bytes([0x06])),                          # MuxConfSw = GATE
+    (0x53, bytes([0x06])),
 ]
+
+CONFIG_BURST_SYNCIN = [
+    (0x52, bytes([0x02])),
+    (0x53, bytes([0x00])),
+    (0x74, (1).to_bytes(4, "little")),
+    (0x69, (1).to_bytes(4, "little")),
+]
+CONFIG_BURST_GATE = [
+    (0x52, bytes([0x02])),
+    (0x53, bytes([0x01])),
+    (0x74, (100).to_bytes(4, "little")),
+    (0x69, (1).to_bytes(4, "little")),
+]
+CONFIG_BURST_NGATE = [
+    (0x52, bytes([0x02])),
+    (0x53, bytes([0x02])),
+    (0x74, (100).to_bytes(4, "little")),
+    (0x69, (1).to_bytes(4, "little")),
+]
+CONFIG_BURST_SOFTWARE = [
+    (0x52, bytes([0x02])),
+    (0x53, bytes([0x03])), 
+    (0x74, (100).to_bytes(4, "little")),
+    (0x69, (1).to_bytes(4, "little")),  
+]
+
 CONFIG_FREQ_DIV_100_SEQUENCE = [
     (0x52, bytes([0x04])),                          # MuxConfSw = F div
     (0x69, (1).to_bytes(4, "little")),
@@ -258,14 +298,14 @@ DELAY_PRESET_DEL = [                                #to change delay preset del0
     (0x16, (22).to_bytes(4, "little")),               #DELCNT1
     (0x5E, bytes([0x04])),                           #Ddelay1
     (0x57, bytes([0x01])),                           #Adelay1
-    #DEL2
-    # (0x19, (22).to_bytes(4, "little")),               #DELCNT2
-    # (0x5F, bytes([0x04])),                           #Ddelay2
-    # (0x58, bytes([0x01])),                           #Adelay2
-    # #DEL3
-    # (0x1A, (3).to_bytes(4, "little")),               #DELCNT3
-    # (0x60, bytes([0x04])),                           #Ddelay3
-    # (0x59, bytes([0x01])),                           #Adelay3
+    # DEL2
+    (0x19, (33).to_bytes(4, "little")),               #DELCNT2
+    (0x5F, bytes([0x04])),                           #Ddelay2
+    (0x58, bytes([0x01])),                           #Adelay2
+    #DEL3
+    (0x1A, (44).to_bytes(4, "little")),               #DELCNT3
+    (0x60, bytes([0x04])),                           #Ddelay3
+    (0x59, bytes([0x01])),                           #Adelay3
     # #DEL4
     # (0x1B, (3).to_bytes(4, "little")),               #DELCNT4
     # (0x5A, bytes([0x04])),                           #Adelay4
@@ -300,6 +340,7 @@ OUT0_CONFIG2_DEL0_DEL1 = [
     (0x31, bytes([0x04])),#MUXRESCONFIG20->CONFIG2 FALLDELAY-->del1
     (0x10, bytes([0x01])),#COMMAND -OFF
 ]
+
 OUT1_CONFIG2_DEL0_DEL1 = [
     (0x10, bytes([0x00])),#COMMAND -OFF
     (0x32, bytes([0x00])),#MUXSETCONFIG11->CONFIG1 RISEDELAY-->NC
@@ -373,6 +414,10 @@ OUT_COMT_OPTCLK= [
 RUN_ON = [
     (0x10, bytes([0x01])),
 ]
+RUN_OFF = [
+    (0x10, bytes([0x00])),
+]
+
 def run_check_out():
     run_sequence(ser , OUT0_CONFIG2_DEL0_DEL1)
     time.sleep(1.00)
@@ -398,8 +443,6 @@ def run_check_out():
     time.sleep(1.00)
        
 
-
-
 def run_sequence(ser, sequence):
     for reg_id, data in sequence:
         if data is None:
@@ -423,9 +466,9 @@ if __name__ == "__main__":
         print(f"Opened {PORT} at {BAUDRATE} baud")
         #run_sequence(ser, INTERNAL_100MHz_SEQUENCE)
         #run_sequence(ser,EXTERNALSINGLEIN_CLKIN_100MHz_SEQUENCE)
-        run_sequence(ser,EXTERNALSINGLEIN_SYNCIN_10MHZ_SEQUENCE)
+        #run_sequence(ser,EXTERNALSINGLEIN_SYNCIN_SEQUENCE)
         time.sleep(1.00)
-        #run_sequence(ser,FREQ_10KHZ)
+        run_sequence(ser,FREQ_10KHZ)
         #run_sequence(ser,EXTERNALDUALIN_CLKIN_100MHZ_SYNCIN_20MHZ_SEQUENCE)
         #run_sequence(ser,ONESHOT_TRIGGER_SOFTWARETRIG)
         #run_sequence(ser,ONESHOT_TRIGGER_SMARTTRIG)
@@ -442,4 +485,10 @@ if __name__ == "__main__":
         #run_sequence(ser, OUT2_CONFIG2_DEL0_DEL1)
         #run_sequence(ser,RUN_ON)
         #run_check_out()
-     
+        #run_sequence(ser,RUN_OFF)
+        # run_sequence(ser, CONFIG_BURST_GATE)
+        # run_sequence(ser, CONFIG_BURST_NGATE)
+        # run_sequence(ser, CONFIG_BURST_SOFTWARE)
+        # run_sequence(ser, CONFIG_BURST_SYNCIN)
+
+
