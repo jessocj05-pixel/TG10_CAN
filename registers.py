@@ -120,6 +120,7 @@ REGS = {
     134: ("AWGdivmux", "u8", 1, {0: "/1", 1: "/2", 2: "/4", 3: "/8"}),
 }
 
+
 # REGISTERS = {info[0]: reg_id for reg_id, info in REGS.items()}
 
 # print(REGISTERS["Command"])

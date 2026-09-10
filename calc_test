@@ -1,79 +1,215 @@
-# test_calc.py
-"""
-Test all calculation functions
-"""
+# test_user_select.py
 
 from calculations import *
+from registers import describe_write
 
-print("=" * 60)
-print("1. Testing parse_time()")
-print("=" * 60)
-print("250ns   →", parse_time("250ns"))
-print("1us     →", parse_time("1us"))
-print("10ms    →", parse_time("10ms"))
-print("2s      →", parse_time("2s"))
-print("100     →", parse_time("100"))        # default ns
+# ============================================================
+# Register maps
+# ============================================================
+DELAY_CNT_REGS = [0x80, 0x16, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E]
+DDLY_REGS      = [0x5D, 0x5E, 0x5F, 0x60, None, 0x62, 0x63]  # no Ddly4
+ADLY_REGS      = [0x56, 0x57, 0x58, 0x59, 0x5A, 0x5B, 0x5C]
+POST_CNT_REGS  = [0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x2C, 0x2D]
 
-print("\n" + "=" * 60)
-print("2. Testing parse_freq()")
-print("=" * 60)
-print("1MHz    →", parse_freq("1MHz"))
-print("100kHz  →", parse_freq("100kHz"))
-print("20MHz   →", parse_freq("20MHz"))
-print("500Hz   →", parse_freq("500Hz"))
 
-print("\n" + "=" * 60)
-print("3. Testing calc_pll2()")
-print("=" * 60)
-for freq in [100, 80, 50, 20, 10]:
-    ndiv, vco, osc = calc_pll2(freq)
-    f_sys = freq * ndiv
-    print(f"{freq:3} MHz → Ndiv={ndiv:3}, VCO={'3GHz' if vco else '2.5GHz'}, "
-          f"OscClock={osc}, f_sys={f_sys:.1f} MHz")
+def make_delay_channel(channel: int, time_str: str, f_sys_hz: float) -> list:
+    delay_cnt, d_delay, a_delay = calc_delay(time_str, f_sys_hz)
+    writes = [(DELAY_CNT_REGS[channel], delay_cnt.to_bytes(4, "little"))]
+    if channel < len(DDLY_REGS) and DDLY_REGS[channel] is not None:
+        writes.append((DDLY_REGS[channel], bytes([d_delay])))
+    if channel < len(ADLY_REGS):
+        writes.append((ADLY_REGS[channel], bytes([a_delay])))
+    return writes
 
-print("\n" + "=" * 60)
-print("4. Testing calc_ratediv()")
-print("=" * 60)
-print("1 µs @ 100 MHz → Ratediv =", calc_ratediv(1e-6, 100e6))
-print("10 µs @ 100 MHz → Ratediv =", calc_ratediv(10e-6, 100e6))
-print("1 µs @ 20 MHz  → Ratediv =", calc_ratediv(1e-6, 20e6))
 
-print("\n" + "=" * 60)
-print("5. Testing calc_delay()  (250 ns example)")
-print("=" * 60)
-f_sys = 100e6
-delay_cnt, d_delay, a_delay = calc_delay(parse_time("250ns"), f_sys)
-print(f"250 ns @ 100 MHz → DelayCnt={delay_cnt}, Ddly={d_delay}, Adly={a_delay}")
+def make_post_channel(channel: int, time_str: str, f_sys_hz: float) -> tuple:
+    val = calc_postcnt(time_str, f_sys_hz)
+    return (POST_CNT_REGS[channel], val.to_bytes(2, "little"))
 
-print("\n" + "=" * 60)
-print("6. Testing calc_postcnt()")
-print("=" * 60)
-print("50 ns @ 100 MHz → PostCnt =", calc_postcnt(parse_time("50ns"), 100e6))
-print("1 us @ 100 MHz  → PostCnt =", calc_postcnt(parse_time("1us"), 100e6))
 
-print("\n" + "=" * 60)
-print("7. Full example (the way you will use it)")
-print("=" * 60)
+def build_clock_part(mode: str, **kwargs) -> tuple[list, float]:
+    if mode == "internal":
+        f_sys = 100e6
+        ratediv = calc_ratediv(kwargs.get("output_freq", "100kHz"), f_sys)
+        seq = [
+            (0x10, bytes([0x00])),
+            (0x75, bytes([0x00])),
+            (0x11, bytes([100])),
+            (0x12, (30).to_bytes(4, "little")),
+            (0x6D, bytes([0x01])),
+            (0x55, bytes([0x00])),
+            (0x54, bytes([0x00])),
+            (0x20, ratediv.to_bytes(4, "little")),
+            (0x10, bytes([0x01])),
+        ]
+        return seq, f_sys
 
-ext_mhz = 20
-ndiv, vco2, osc_clock = calc_pll2(ext_mhz)
-ratediv = calc_ratediv(parse_time("1us"), ext_mhz * 1e6)
-delay_cnt, d_delay, a_delay = calc_delay(parse_time("250ns"), ext_mhz * 1e6)
-post_cnt = calc_postcnt(parse_time("50ns"), ext_mhz * 1e6)
+    elif mode == "external_clkin":
+        ext_mhz = parse_freq(kwargs.get("ext_clock", "20MHz")) / 1e6
+        res = calc_external_clock(ext_mhz)
+        ratediv = calc_ratediv(kwargs.get("output_freq", "1MHz"), ext_mhz * 1e6)
+        f_sys = ext_mhz * 1e6
+        seq = [
+            (0x10, bytes([0x00])),
+            (0x75, bytes([0x01])),
+            (0x11, bytes([res["osc_clock"]])),
+            (0x6D, bytes([res["vco2"]])),
+            (0x12, res["ndiv"].to_bytes(4, "little")),
+            (0x55, bytes([0x01])),
+            (0x54, bytes([0x01])),
+            (0x20, ratediv.to_bytes(4, "little")),
+            (0x10, bytes([0x01])),
+        ]
+        return seq, f_sys
 
-print(f"Ndiv      = {ndiv}")
-print(f"VCO       = {vco2} ({'3GHz' if vco2 else '2.5GHz'})")
-print(f"OscClock  = {osc_clock}")
-print(f"Ratediv   = {ratediv}")
-print(f"DelayCnt0 = {delay_cnt}")
-print(f"Ddly0     = {d_delay}")
-print(f"Adly0     = {a_delay}")
-print(f"PostCnt0  = {post_cnt}")
+    elif mode == "external_syncin":
+        f_sys = 100e6
+        ratediv = int(kwargs.get("ratediv", 10))
+        seq = [
+            (0x10, bytes([0x00])),
+            (0x75, bytes([0x00])),
+            (0x11, bytes([100])),
+            (0x12, (30).to_bytes(4, "little")),
+            (0x6D, bytes([0x01])),
+            (0x55, bytes([0x03])),
+            (0x54, bytes([0x00])),
+            (0x20, ratediv.to_bytes(4, "little")),
+            (0x10, bytes([0x01])),
+        ]
+        return seq, f_sys
 
-print("\nReady-to-use sequence lines:")
-print(f"(0x12, ({ndiv}).to_bytes(4, \"little\")),")
-print(f"(0x20, ({ratediv}).to_bytes(4, \"little\")),")
-print(f"(0x80, ({delay_cnt}).to_bytes(4, \"little\")),")
-print(f"(0x5D, bytes([{d_delay}])),")
-print(f"(0x56, bytes([{a_delay}])),")
-print(f"(0x26, ({post_cnt}).to_bytes(2, \"little\")),")
+    elif mode == "dual":
+        ext_mhz = parse_freq(kwargs.get("ext_clock", "100MHz")) / 1e6
+        res = calc_external_clock(ext_mhz)
+        ratediv = int(kwargs.get("ratediv", 200))
+        f_sys = ext_mhz * 1e6
+        seq = [
+            (0x10, bytes([0x00])),
+            (0x75, bytes([0x01])),
+            (0x11, bytes([res["osc_clock"]])),
+            (0x6D, bytes([res["vco2"]])),
+            (0x12, res["ndiv"].to_bytes(4, "little")),
+            (0x55, bytes([0x03])),
+            (0x54, bytes([0x01])),
+            (0x20, ratediv.to_bytes(4, "little")),
+            (0x10, bytes([0x01])),
+        ]
+        return seq, f_sys
+
+    return [], 100e6
+
+
+def ask_delay_channels(seq: list, f_sys: float):
+    """Ask user for Delay0-7. Press q to finish."""
+    print("\n--- Set Delay channels (0-7) ---")
+    print("Enter channel number + time. Type 'q' to finish.")
+    while True:
+        ch_str = input("  Delay channel (0-7 or q): ").strip().lower()
+        if ch_str == "q":
+            break
+        try:
+            ch = int(ch_str)
+            if 0 <= ch <= 7:
+                time_str = input(f"  Time for Delay{ch} (e.g. 250ns): ").strip()
+                if time_str:
+                    seq.extend(make_delay_channel(ch, time_str, f_sys))
+                    print(f"  → Added Delay{ch} = {time_str}")
+            else:
+                print("  Channel must be 0-7")
+        except ValueError:
+            print("  Invalid input")
+
+
+def ask_post_channels(seq: list, f_sys: float):
+    """Ask user for PostCnt0-7. Press q to finish."""
+    print("\n--- Set PostCnt channels (0-7) ---")
+    print("Enter channel number + time. Type 'q' to finish.")
+    while True:
+        ch_str = input("  PostCnt channel (0-7 or q): ").strip().lower()
+        if ch_str == "q":
+            break
+        try:
+            ch = int(ch_str)
+            if 0 <= ch <= 7:
+                time_str = input(f"  Time for PostCnt{ch} (e.g. 50ns): ").strip()
+                if time_str:
+                    seq.append(make_post_channel(ch, time_str, f_sys))
+                    print(f"  → Added PostCnt{ch} = {time_str}")
+            else:
+                print("  Channel must be 0-7")
+        except ValueError:
+            print("  Invalid input")
+
+
+# ============================================================
+# MAIN LOOP
+# ============================================================
+if __name__ == "__main__":
+    while True:
+        print("\n" + "=" * 60)
+        print("SY4000 / TG10 Sequence Builder")
+        print("=" * 60)
+        print("  1. Internal 100 MHz")
+        print("  2. External Single IN (CLKIN)")
+        print("  3. External SYNCIN")
+        print("  4. Dual IN (CLKIN + SYNCIN)")
+        print("  5. Delay presets only (Delay0-7)")
+        print("  6. PostDelay presets only (PostCnt0-7)")
+        print("  q. Quit")
+        print()
+
+        choice = input("Enter choice (1-6 or q): ").strip().lower()
+
+        if choice == "q":
+            print("Bye!")
+            break
+
+        seq = []
+        f_sys = 100e6
+
+        if choice == "1":
+            freq = input("Output frequency (e.g. 100kHz): ") or "100kHz"
+            seq, f_sys = build_clock_part("internal", output_freq=freq)
+
+        elif choice == "2":
+            ext = input("External clock (e.g. 20MHz): ") or "20MHz"
+            freq = input("Output frequency (e.g. 1MHz): ") or "1MHz"
+            seq, f_sys = build_clock_part("external_clkin", ext_clock=ext, output_freq=freq)
+
+        elif choice == "3":
+            ratediv = input("Ratediv value (e.g. 10): ") or "10"
+            seq, f_sys = build_clock_part("external_syncin", ratediv=ratediv)
+
+        elif choice == "4":
+            ext = input("External clock (e.g. 100MHz): ") or "100MHz"
+            ratediv = input("Ratediv value (e.g. 200): ") or "200"
+            seq, f_sys = build_clock_part("dual", ext_clock=ext, ratediv=ratediv)
+
+        elif choice == "5":
+            ask_delay_channels(seq, f_sys)
+
+        elif choice == "6":
+            ask_post_channels(seq, f_sys)
+
+        else:
+            print("Invalid choice")
+            continue
+
+        # Optional: add delays after clock modes
+        if choice in ("1", "2", "3", "4"):
+            add = input("\nAlso set Delay / PostCnt? (y/n): ").strip().lower()
+            if add == "y":
+                ask_delay_channels(seq, f_sys)
+                ask_post_channels(seq, f_sys)
+
+        # Show sequence
+        print("\n" + "=" * 70)
+        print("GENERATED SEQUENCE")
+        print("=" * 70)
+        if not seq:
+            print("No registers to write.")
+        else:
+            for reg_id, data in seq:
+                print(f"(0x{reg_id:02X}, {data})   →  {describe_write(reg_id, data)}")
+
+        input("\nPress Enter to return to main menu...")

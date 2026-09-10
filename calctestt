@@ -1,0 +1,221 @@
+"""test.py — interactive user-input version. Prompts for each value, validates
+against thresholds, builds full CAN seq. Run: python test.py
+"""
+
+from calculations import (
+    resolve_vco_mode, system_clock_hz,
+    calc_delay, validate_delay, min_delay_time_s, max_delay_time_s,
+    calc_post_delay_checked, min_post_delay_s, max_post_delay_s,
+    calc_rate_divider, calc_burst_mode, calc_freq_div_mode,
+    calc_dac_config, calc_watchdog_period,
+    parse_time, parse_freq,
+)
+
+# ================= REGISTER ADDR MAPS (from your CAN dump — fill/verify real addrs) =================
+
+DELAY_REGS = {
+    0: {"cnt": 0x80, "d": 0x5D, "a": 0x56},
+    1: {"cnt": 0x16, "d": 0x5E, "a": 0x57},
+    2: {"cnt": 0x19, "d": 0x5F, "a": 0x58},
+    3: {"cnt": 0x1A, "d": 0x60, "a": 0x59},
+    4: {"cnt": 0x1B, "d": None, "a": 0x5A},   # own 100MHz clk, no D-delay
+    5: {"cnt": 0x1C, "d": 0x5B, "a": 0x5C},
+    6: {"cnt": 0x1D, "d": 0x5F, "a": 0x60},   # PLACEHOLDER — verify real addr
+    7: {"cnt": 0x1E, "d": None, "a": None},   # shares ch6's D/A regs
+}
+POSTDEL_REGS = {i: 0x26 + i for i in range(8)}  # PLACEHOLDER past ch1 — verify real addrs
+
+
+def ask(prompt, default=None, required=True):
+    while True:
+        raw = input(f"{prompt}" + (f" [{default}]" if default else "") + ": ").strip()
+        if not raw and default is not None:
+            return default
+        if not raw and not required:
+            return None
+        if raw:
+            return raw
+        print("  required, try again")
+
+
+def main():
+    print("=== SY4000 config — enter values ===\n")
+
+    # ---------- 1. CLOCK ----------
+    ext_clk_str = ask("External clock freq (e.g. 20MHz)", default="20MHz")
+    ext_clk_hz = parse_freq(ext_clk_str)
+    res = resolve_vco_mode(ext_clk_hz / 1e6)
+    f_hz = system_clock_hz("external", n_div=res["ndiv"], ext_clk_hz=ext_clk_hz)
+    print(f"  -> Ndiv={res['ndiv']} VCO={res['vco2']} sysclk={f_hz/1e9:.3f}GHz")
+
+    min_t = min_delay_time_s(f_hz)
+    max_t = max_delay_time_s(f_hz)
+    print(f"  (delay range ch0-3,5,6: ~{min_t*1e9:.1f}ns .. ~{max_t*1e3:.1f}ms)")
+    min_t4 = min_delay_time_s(f_hz, channel=4)
+    max_t4 = max_delay_time_s(f_hz, channel=4)
+    print(f"  (delay range ch4 (own 100MHz clk): ~{min_t4*1e9:.1f}ns .. ~{max_t4*1e3:.1f}ms)")
+    min_pd = min_post_delay_s(f_hz)
+    max_pd = max_post_delay_s(f_hz)
+    print(f"  (post-delay range: ~{min_pd*1e9:.1f}ns .. ~{max_pd*1e9:.1f}ns)\n")
+
+    # ---------- 2. RATE DIVIDER ----------
+    period_str = ask("Trigger period (e.g. 100ns)", default="100ns")
+    while True:
+        try:
+            ratediv = calc_rate_divider(parse_time(period_str), 10e-9)
+            break
+        except ValueError as e:
+            print(f"  !! {e}")
+            period_str = ask("  retry trigger period")
+    print(f"  -> ratediv={ratediv}\n")
+
+    # ---------- 3. DELAY CHANNELS ----------
+    delay_results = {}
+    print("Delay channels 0-5 (ch6/7 shared, asked separately). Leave blank to skip.")
+    for ch in range(6):
+        while True:
+            t_str = ask(f"  DEL{ch} time (e.g. 250ns)", required=False)
+            if t_str is None:
+                break
+            f_for_ch = 100e6 if ch == 4 else f_hz
+            try:
+                r = calc_delay(parse_time(t_str), f_for_ch, ch)
+                validate_delay(r, ch)
+                delay_results[ch] = r
+                print(f"    -> {r}")
+                break
+            except ValueError as e:
+                print(f"    !! {e}")
+                lo = min_delay_time_s(f_hz, channel=ch if ch == 4 else None)
+                hi = max_delay_time_s(f_hz, channel=ch if ch == 4 else None)
+                print(f"    valid range: {lo*1e9:.1f}ns .. {hi*1e3:.1f}ms, try again")
+
+    while True:
+        t6_str = ask("  DEL6/7 (shared A/D delay) time (e.g. 1us)", required=False)
+        if t6_str is None:
+            break
+        try:
+            r6 = calc_delay(parse_time(t6_str), f_hz, 6)
+            validate_delay(r6, 6)
+            delay_results[6] = r6
+            print(f"    -> ch6/7 shared: {r6}")
+            break
+        except ValueError as e:
+            print(f"    !! {e}")
+            print(f"    valid range: {min_t*1e9:.1f}ns .. {max_t*1e3:.1f}ms, try again")
+
+    # ---------- 4. POST DELAY ----------
+    postdel_results = {}
+    print("\nPost-delay widths 0-7. Leave blank to skip.")
+    for ch in range(8):
+        while True:
+            w_str = ask(f"  PostDel{ch} width (e.g. 500ns)", required=False)
+            if w_str is None:
+                break
+            try:
+                pd = calc_post_delay_checked(parse_time(w_str), f_hz)
+                postdel_results[ch] = pd
+                print(f"    -> {pd}")
+                break
+            except ValueError as e:
+                print(f"    !! {e}")
+                print(f"    valid range: {min_pd*1e9:.1f}ns .. {max_pd*1e9:.1f}ns, try again")
+
+    # ---------- 5. DAC ----------
+    print()
+    dac1_str = ask("DAC1 voltage, Config1 (0-1V, e.g. 0.3)", default="0.3")
+    dac2_str = ask("DAC2 voltage, Config2 (0-1V, e.g. 1.0)", default="1.0")
+    while True:
+        try:
+            dac = calc_dac_config(float(dac1_str), float(dac2_str))
+            break
+        except ValueError as e:
+            print(f"  !! {e}")
+            dac1_str = ask("  retry DAC1 voltage")
+            dac2_str = ask("  retry DAC2 voltage")
+    print(f"  -> {dac}\n")
+
+    # ---------- 6. BURST / F DIV ----------
+    burst_str = ask("Burst count (1-65535, e.g. 100)", default="100")
+    fdiv_str = ask("F div (1-65535, e.g. 1)", default="1")
+    while True:
+        try:
+            burst = calc_burst_mode(int(burst_str), fdiv_n=int(fdiv_str))
+            break
+        except ValueError as e:
+            print(f"  !! {e}")
+            burst_str = ask("  retry burst count")
+            fdiv_str = ask("  retry f_div")
+    print(f"  -> {burst}\n")
+
+    # ---------- 7. WATCHDOG (optional) ----------
+    use_wd = ask("Enable trigger-rate watchdog? (y/n)", default="n")
+    watchdog_ticks = None
+    if use_wd.lower() == "y":
+        wd_freq_str = ask("  Watchdog min trigger freq (e.g. 20MHz)", default="20MHz")
+        while True:
+            try:
+                watchdog_ticks = calc_watchdog_period(freq_hz=parse_freq(wd_freq_str))
+                break
+            except ValueError as e:
+                print(f"    !! {e}")
+                wd_freq_str = ask("    retry watchdog freq")
+        print(f"  -> watchdog_ticks={watchdog_ticks}\n")
+
+    # ---------- 8. BUILD FULL SEQ ----------
+    seq = [
+        (0x10, bytes([0x00])),                                       # Command OFF
+        (0x75, bytes([0x01])),                                       # OscClkMux = External
+        (0x11, bytes([int(ext_clk_hz / 1e6)])),                      # OscClock
+        (0x6D, bytes([0x01 if res["vco2"] == "3GHz" else 0x00])),    # VCO
+        (0x12, res["ndiv"].to_bytes(4, "little")),                   # Ndiv
+        (0x55, bytes([0x01])),                                       # MuxRateClk = OPTCLK
+        (0x54, bytes([0x01])),                                       # MuxStartTrg
+        (0x20, ratediv.to_bytes(4, "little")),                       # Ratediv
+        (0x10, bytes([0x01])),                                       # Command ON
+    ]
+
+    for ch, r in delay_results.items():
+        addr = DELAY_REGS[ch]
+        seq.append((addr["cnt"], r["delay_counter"].to_bytes(4, "little")))   # DELCNTx
+        if addr["d"] is not None and "d_delay" in r:
+            seq.append((addr["d"], bytes([r["d_delay"]])))                    # Ddelayx
+        if addr["a"] is not None and "a_delay" in r:
+            seq.append((addr["a"], bytes([r["a_delay"]])))                    # Adelayx
+
+    for ch, pd in postdel_results.items():
+        seq.append((POSTDEL_REGS[ch], pd.to_bytes(2, "little")))              # PostCntx
+
+    seq.append((0x6B, dac["dac1"].to_bytes(2, "little")))     # DAC1->CONFIG1
+    seq.append((0x6C, dac["dac2"].to_bytes(2, "little")))     # DAC2->CONFIG2
+    seq.append((0x74, burst["burst_count"].to_bytes(4, "little")))  # burst count
+    seq.append((0x69, burst["f_div"].to_bytes(4, "little")))        # fdiv
+
+    if watchdog_ticks is not None:
+        seq.append((0x30, watchdog_ticks.to_bytes(4, "little")))    # Trigger Tmin delay (verify addr)----wrong
+        
+
+    # ---------- 9. VERIFY + DISPLAY ----------
+    assert all(isinstance(a, int) for a, _ in seq), "seq addr type check failed"
+    assert all(isinstance(p, (bytes, bytearray)) for _, p in seq), "seq payload type check failed"
+
+    print(f"=== built seq, {len(seq)} entries ===")
+    for addr, payload in seq:
+        print(f"  0x{addr:02X}: {payload.hex()}")
+
+    print("\n--- paste-ready tuple list ---")
+    for addr, payload in seq:
+        print(f"    (0x{addr:02X}, bytes.fromhex('{payload.hex()}')),")
+
+    confirm = ask("\nSend to device? (y/n)", default="n")
+    if confirm.lower() == "y":
+        # send(seq)   <- wire your existing CAN send fn here
+        print("would send now — wire up send(seq) here")
+    else:
+        print("aborted, no CAN write")
+
+    return seq
+
+
+if __name__ == "__main__":
+    main()

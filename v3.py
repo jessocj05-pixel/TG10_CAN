@@ -275,7 +275,7 @@ CONFIG_BURST_GATE = [
 CONFIG_BURST_NGATE = [
     (0x52, bytes([0x02])),
     (0x53, bytes([0x02])),
-    (0x74, (100).to_bytes(4, "little")),
+    (0x74, (100).to_bytes(4, "little")),  #burst coount
     (0x69, (1).to_bytes(4, "little")),
 ]
 CONFIG_BURST_SOFTWARE = [

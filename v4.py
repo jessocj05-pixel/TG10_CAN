@@ -118,41 +118,42 @@ ndiv = get_int(f"Enter ndiv")
 # Example: "External Single In -> SYNC IN -> 10MHz" sequence
 INTERNAL_100MHz_SEQUENCE = [
     (0x10, bytes([0x00])),                          # Command = OFF
-    (0x75, bytes([0x00])),                          # OscClkMux = Internal 100MHz
-    (0x11, bytes([0x64])),                          # OscClock = 100
-    (0x12, (30).to_bytes(4, "little")),              # Ndiv = 30
-    (0x6D, bytes([0x01])),                          # VCO2 freq = 3GHz
+    (0x75, bytes([0x00])),                          # OscClkMux = Internal 100MHz--fixed
+    (0x11, bytes([0x64])),                          # OscClock = 100---fixed
+    (0x12, (30).to_bytes(4, "little")),              # Ndiv = 30--fixed
+    (0x6D, bytes([0x01])),                          # VCO2 freq = 3GHz--fixed
     (0x55, bytes([0x00])),                          # MuxRateClk = internal
     (0x54, bytes([0x00])),                          # MuxStartTrg = Rate divider
-    (0x20, (1000).to_bytes(4, "little")),             # Ratediv = 1000
+    (0x20, (1000).to_bytes(4, "little")),             # Ratediv = 1000--variable
     (0x10, bytes([0x01])),                          # Command = ON
 ]
 EXTERNALSINGLEIN_CLKIN_100MHz_SEQUENCE = [
     (0x10, bytes([0x00])),                          # Command = OFF
-    (0x75, bytes([0x01])),                          # OscClkMux = exterenal
-    (0x11, bytes([0x64])),                          # OscClock = 100--->change clk
-    (0x12, (30).to_bytes(4, "little")),              # Ndiv = 30
-    (0x6D, bytes([0x01])),                          # VCO2 freq = 3GHz
+    (0x75, bytes([0x01])),                          # OscClkMux = exterenal ---fixed
+    (0x11, bytes([0x64])),                          # OscClock = 100--->change clk--variable
+    (0x12, (30).to_bytes(4, "little")),              # Ndiv = 30--variable
+    (0x6D, bytes([0x01])),                          # VCO2 freq = 3GHz--depends on osclk/ndiv
     (0x55, bytes([0x01])),                          # MuxRateClk = external
-    (0x54, bytes([0x01])),                          # MuxStartTrg = Rate divider@optclk
-    (0x20, (100).to_bytes(4, "little")),             # Ratediv = 1000 -->set freq
+    (0x54, bytes([0x01])),                          # MuxStartTrg = Rate divider@optclk --fixed
+    (0x20, (100).to_bytes(4, "little")),             # Ratediv = 1000 -->set freq--->variable
     (0x76, None),
     (0x77, None),
     #(0x10, bytes([0x01])),                          # Command = ON
 ]
+
 # befor run give the sync of desired value then only it work 
 # freq given 5Mhz               freq = 5000000/10 = 5,00,000(500Khz)
 # freq given 5Mhz               freq = 10000000/10 = 10,00,000()
 # freq given 5Mhz               freq = 20000000/10 = 20,00,000()
 EXTERNALSINGLEIN_SYNCIN_10MHZ_SEQUENCE = [
     (0x10, bytes([0x00])),                          # Command = OFF
-    (0x75, bytes([0x00])),                          # OscClkMux = Internal 100MHz
-    (0x11, bytes([0x64])),                          # OscClock = 100
-    (0x12, (30).to_bytes(4, "little")),              # Ndiv = 30
-    (0x6D, bytes([0x01])),                           # VCO2 freq = 3GHz
-    (0x20, (2).to_bytes(4, "little")),             #  output frequency depend on syncin freq freq = syncin / ratedivide
-    (0x55, bytes([0x03])),                          # MuxRateClk = SYNCIN
-    (0x54, bytes([0x00])),                          # MuxStartTrg = Rate divider
+    (0x75, bytes([0x00])),                          # OscClkMux = Internal 100MHz -->fixed
+    (0x11, bytes([0x64])),                          # OscClock = 100-->fixed
+    (0x12, (30).to_bytes(4, "little")),              # Ndiv = 30-->fixed
+    (0x6D, bytes([0x01])),                           # VCO2 freq = 3GHz-->fixed
+    (0x20, (2).to_bytes(4, "little")),             #  output frequency depend on syncin freq freq = syncin / ratedivide-->variable
+    (0x55, bytes([0x03])),                          # MuxRateClk = SYNCIN  --fixed
+    (0x54, bytes([0x00])),                          # MuxStartTrg = Rate divider---fixed
     # (0x20, (100).to_bytes(4, "little")),             # Ratediv = 100
     (0x10, bytes([0x01])),                          # Command = ON
 
@@ -160,24 +161,24 @@ EXTERNALSINGLEIN_SYNCIN_10MHZ_SEQUENCE = [
 
 EXTERNALDUALIN_CLKIN_100MHZ_SYNCIN_20MHZ_SEQUENCE = [
     (0x10, bytes([0x00])),                          # Command = OFF
-    (0x75, bytes([0x01])),                          # OscClkMux = Internal 100MHz
-    (0x11, bytes([0x64])),                          # OscClock = 100
-    (0x12, (30).to_bytes(4, "little")),              # Ndiv = 30
-    (0x6D, bytes([0x01])),                          # VCO2 freq = 3GHz
-    (0x55, bytes([0x03])),                          # MuxRateClk = SYNCIN
-    (0x54, bytes([0x01])),                          # MuxStartTrg = Rate divider
-    (0x20, (200).to_bytes(4, "little")),             # Ratediv = 100
+    (0x75, bytes([0x01])),                          # OscClkMux = external
+    (0x11, bytes([0x64])),                          # OscClock = 100--->variable
+    (0x12, (30).to_bytes(4, "little")),              # Ndiv = 30-->variable
+    (0x6D, bytes([0x01])),                          # VCO2 freq = 3GHz--?>depends
+    (0x55, bytes([0x03])),                          # MuxRateClk = SYNCIN--->fixed
+    (0x54, bytes([0x01])),                          # MuxStartTrg -->fixed
+    (0x20, (200).to_bytes(4, "little")),             # Ratediv = 100-->variable
     #(0x10, bytes([0x01])),                          # Command = ON
 ]
 ONESHOT_TRIGGER_SOFTWARETRIG = [
     (0x10, bytes([0x00])),                          # Command = OFF
     (0x75, bytes([0x01])),                          # OscClkMux = Internal 100MHz
-    (0x11, bytes([0x64])),                          # OscClock = 100
-    (0x12, (ndiv).to_bytes(4, "little")),              # Ndiv = 30
-    (0x6D, bytes([0x01])),                          # VCO2 freq = 3GHz
-    (0x55, bytes([0x00])),                          # MuxRateClk = SYNCIN
-    (0x54, bytes([0x04])),                          # MuxStartTrg = Rate divider
-    (0x20, (ratediv).to_bytes(4, "little")),             # Ratediv = 100
+    (0x11, bytes([0x64])),                          # OscClock = 100-->fixed
+    (0x12, (ndiv).to_bytes(4, "little")),              # Ndiv = 30-->fixed
+    (0x6D, bytes([0x01])),                          # VCO2 freq = 3GHz--fixed
+    (0x55, bytes([0x00])),                          
+    (0x54, bytes([0x04])),                         
+    (0x20, (ratediv).to_bytes(4, "little")),             # Ratediv = 100-->variable
     (0X70, bytes([0X01])),
     (0X70, bytes([0X00])),
     #(0x10, bytes([0x01])),                          # Command = ON
@@ -193,16 +194,16 @@ ONESHOT_TRIGGER_SMARTTRIG= [
     (0x26, bytes([0x20])),
     (0x2E, bytes([0x03])),
 
-    (0x12, (30).to_bytes(4, "little")),              # Ndiv = 30
-    (0x6D, bytes([0x01])),                          # VCO2 freq = 3GHz
-    (0x55, bytes([0x00])),                          # MuxRateClk = SYNCIN
-    (0x54, bytes([0x05])),                          # MuxStartTrg = Rate divider
-    (0x20, (200).to_bytes(4, "little")),             # Ratediv = 100
+    (0x12, (30).to_bytes(4, "little")),              # Ndiv = 30---fixed
+    (0x6D, bytes([0x01])),                          # VCO2 freq = 3GHz---fixed
+    (0x55, bytes([0x00])),                          
+    (0x54, bytes([0x05])),                          
+    (0x20, (200).to_bytes(4, "little")),             # Ratediv = 100--variable
     #(0x10, bytes([0x01])),                          # Command = ON
 ]
 
 FREQ_10KHZ = [
-    (0x20, (10000).to_bytes(4, "little")),
+    (0x20, (10000).to_bytes(4, "little")),   #variable
 ]
 
 PRESET1_CHANNEL_SEQUENCE = [
