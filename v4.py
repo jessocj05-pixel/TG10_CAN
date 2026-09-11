@@ -14,7 +14,7 @@ import time
 from registers import describe_write
 
 
-from user import get_int, ratediv, ndiv
+from user import get_int, get_float, ratediv, ndiv, freq, tperiod
 
 PORT = "COM13"          # change to your adapter's port, e.g. "/dev/ttyUSB0" on Linux
 BAUDRATE = 2000000      # adapter's serial baud (check your adapter config, common default)
@@ -113,6 +113,8 @@ user input
 
 ratediv = get_int(f"Enter ratediv")
 ndiv = get_int(f"Enter ndiv")
+freq = get_int(f"Enter output freq")
+tperiod = get_float(f"Enter tperiod")
 
 
 # Example: "External Single In -> SYNC IN -> 10MHz" sequence
