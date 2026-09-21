@@ -18,6 +18,8 @@ from readtest import *
 from user import get_int, get_float, ratediv, ndiv, freq, tperiod
 # from user_calculation import read_osc_clk
 
+from readv1 import read_status, read_config
+
 
 PORT = "COM11"          # change to your adapter's port, e.g. "/dev/ttyUSB0" on Linux
 BAUDRATE = 2000000      # adapter's serial baud (check your adapter config, common default)
@@ -778,11 +780,21 @@ def describewrite(sequence):
 if __name__ == "__main__":
     with serial.Serial(PORT, BAUDRATE, timeout=TIMEOUT) as ser:
         print(f"Opened {PORT} at {BAUDRATE} baud")
-        run_sequence(ser, INTERNAL_100MHz_SEQUENCE)
+
+         # quick test: only read, no writes
+        try:
+            read_status(ser)
+        except Exception as e:
+            print("Error:", e)
+
+
+
+        read_config(ser)
+        #run_sequence(ser, INTERNAL_100MHz_SEQUENCE)
         #run_sequence(ser,EXTERNALSINGLEIN_CLKIN_100MHz_SEQUENCE)
         #run_sequence(ser,EXTERNALSINGLEIN_SYNCIN_10MHZ_SEQUENCE)
         time.sleep(1.00)
-        run_sequence(ser,FREQ_10KHZ)
+        #run_sequence(ser,FREQ_10KHZ)
         #run_sequence(ser,EXTERNALDUALIN_CLKIN_100MHZ_SYNCIN_20MHZ_SEQUENCE)
         #run_sequence(ser,ONESHOT_TRIGGER_SOFTWARETRIG)
        
@@ -793,57 +805,57 @@ if __name__ == "__main__":
         # except Exception as e:
         #     print("Error:", e)
 
-        run_sequence(ser, CONFIG_FREQ_DIV_100_SEQUENCE)
+        #run_sequence(ser, CONFIG_FREQ_DIV_100_SEQUENCE)
 
-        try:
+        # try:
 
-            # 1. Output frequency (auto Hz / kHz / MHz)
-            out  = read_output_frequency(ser, show=False)
+        #     # 1. Output frequency (auto Hz / kHz / MHz)
+        #     out  = read_output_frequency(ser, show=False)
 
-            # 2. Sync / Trigger mode
-            sync = read_sync_mode(ser, show=False)
+        #     # 2. Sync / Trigger mode
+        #     sync = read_sync_mode(ser, show=False)
 
-            # 3. Live CLK IN + SYNC IN
-            live = read_live_frequencies(ser, show=False)
+        #     # 3. Live CLK IN + SYNC IN
+        #     live = read_live_frequencies(ser, show=False)
 
-            # 4. Burst / Gate / Freq-div configuration
-            conf = read_burst_config(ser, show=False)
+        #     # 4. Burst / Gate / Freq-div configuration
+        #     conf = read_burst_config(ser, show=False)
 
-            # Optional: use the returned values
-            # Now print only the clean summaries
-            print("=== Output Frequency ===")
-            print(f"Mode            : {out['mode']}")
-            print(f"Rate clock      : {out['rate_clock_hz']:,.1f} Hz")
-            print(f"Ratediv (0x20)  : {out['ratediv']}")
-            print(f"Output Frequency: {out['freq_str']}")
-            print(f"Period          : {out['period_s']*1e9:.1f} ns")
-            print("=" * 32)
+        #     # Optional: use the returned values
+        #     # Now print only the clean summaries
+        #     print("=== Output Frequency ===")
+        #     print(f"Mode            : {out['mode']}")
+        #     print(f"Rate clock      : {out['rate_clock_hz']:,.1f} Hz")
+        #     print(f"Ratediv (0x20)  : {out['ratediv']}")
+        #     print(f"Output Frequency: {out['freq_str']}")
+        #     print(f"Period          : {out['period_s']*1e9:.1f} ns")
+        #     print("=" * 32)
 
-            print("\n=== Sync / Trigger Mode ===")
-            print(f"Mode            : {sync['mode']}")
-            # print(f"0x75 OscClkMux  : {sync['osc_clk_mux']}  ({'External' if sync['osc_clk_mux'] else 'Internal'})")
-            # print(f"0x55 MuxRateClk : {sync['rate_clk']}")
-            # print(f"0x54 MuxStartTrg: {sync['start_trg']}")
-            print("=" * 32)
+        #     print("\n=== Sync / Trigger Mode ===")
+        #     print(f"Mode            : {sync['mode']}")
+        #     # print(f"0x75 OscClkMux  : {sync['osc_clk_mux']}  ({'External' if sync['osc_clk_mux'] else 'Internal'})")
+        #     # print(f"0x55 MuxRateClk : {sync['rate_clk']}")
+        #     # print(f"0x54 MuxStartTrg: {sync['start_trg']}")
+        #     print("=" * 32)
 
-            print("\n=== Live Frequencies ===")
-            print(f"Current mode    : {live['mode']}")
-            if live['clk_in_hz'] is not None:
-                print(f"CLK IN  (0x76)  : {live['clk_in_hz']/1000:.2f} kHz")
-            if live['sync_in_hz'] is not None:
-                print(f"SYNC IN (0x77)  : {live['sync_in_hz']/1000:.2f} kHz")
-            print("=" * 32)
+        #     print("\n=== Live Frequencies ===")
+        #     print(f"Current mode    : {live['mode']}")
+        #     if live['clk_in_hz'] is not None:
+        #         print(f"CLK IN  (0x76)  : {live['clk_in_hz']/1000:.2f} kHz")
+        #     if live['sync_in_hz'] is not None:
+        #         print(f"SYNC IN (0x77)  : {live['sync_in_hz']/1000:.2f} kHz")
+        #     print("=" * 32)
 
-            print("\n=== Burst / Config Mode ===")
-            print(f"Mode            : {conf['mode']}")
-            # print(f"MuxConfSw (0x52): {conf['mux_conf_sw']}")
-            # print(f"MuxBurstT (0x53): {conf['mux_burst_t']}")
-            print(f"Burst count     : {conf['burst_count']}")
-            # print(f"Fdiv (0x69)     : {conf['fdiv']}")
-            print(f"Description     : {conf['description']}")
-            print("=" * 32)
-        except Exception as e:
-            print("Error:", e)
+        #     print("\n=== Burst / Config Mode ===")
+        #     print(f"Mode            : {conf['mode']}")
+        #     # print(f"MuxConfSw (0x52): {conf['mux_conf_sw']}")
+        #     # print(f"MuxBurstT (0x53): {conf['mux_burst_t']}")
+        #     print(f"Burst count     : {conf['burst_count']}")
+        #     # print(f"Fdiv (0x69)     : {conf['fdiv']}")
+        #     print(f"Description     : {conf['description']}")
+        #     print("=" * 32)
+        # except Exception as e:
+        #     print("Error:", e)
 
         # no need for finally/ser.close() – the with statement closes it automatically
 
