@@ -18,7 +18,7 @@ from readtest import *
 from user import get_int, get_float, ratediv, ndiv, freq, tperiod
 # from user_calculation import read_osc_clk
 
-from readv1 import read_status, read_config
+from readv1 import read_status, read_config, read_live, snap, read_mux_delay
 
 
 PORT = "COM11"          # change to your adapter's port, e.g. "/dev/ttyUSB0" on Linux
@@ -790,6 +790,17 @@ if __name__ == "__main__":
 
 
         read_config(ser)
+        read_live(ser)
+
+        # a = snap(ser)
+        # for _ in range(5):
+        #     read_live(ser)
+        # b = snap(ser)
+        # print("Config changed:", a != b)
+        # print(a); print(b)
+
+
+        read_mux_delay(ser)
         #run_sequence(ser, INTERNAL_100MHz_SEQUENCE)
         #run_sequence(ser,EXTERNALSINGLEIN_CLKIN_100MHz_SEQUENCE)
         #run_sequence(ser,EXTERNALSINGLEIN_SYNCIN_10MHZ_SEQUENCE)
@@ -798,70 +809,13 @@ if __name__ == "__main__":
         #run_sequence(ser,EXTERNALDUALIN_CLKIN_100MHZ_SYNCIN_20MHZ_SEQUENCE)
         #run_sequence(ser,ONESHOT_TRIGGER_SOFTWARETRIG)
        
-        # Read the Oscillator clock from the device
-        # try:
-        #     osc_mhz = read_osc_clk(ser)
-        #     print(f"Oscillator clock is {osc_mhz} MHz")
-        # except Exception as e:
-        #     print("Error:", e)
+        
 
         #run_sequence(ser, CONFIG_FREQ_DIV_100_SEQUENCE)
 
-        # try:
+       
 
-        #     # 1. Output frequency (auto Hz / kHz / MHz)
-        #     out  = read_output_frequency(ser, show=False)
-
-        #     # 2. Sync / Trigger mode
-        #     sync = read_sync_mode(ser, show=False)
-
-        #     # 3. Live CLK IN + SYNC IN
-        #     live = read_live_frequencies(ser, show=False)
-
-        #     # 4. Burst / Gate / Freq-div configuration
-        #     conf = read_burst_config(ser, show=False)
-
-        #     # Optional: use the returned values
-        #     # Now print only the clean summaries
-        #     print("=== Output Frequency ===")
-        #     print(f"Mode            : {out['mode']}")
-        #     print(f"Rate clock      : {out['rate_clock_hz']:,.1f} Hz")
-        #     print(f"Ratediv (0x20)  : {out['ratediv']}")
-        #     print(f"Output Frequency: {out['freq_str']}")
-        #     print(f"Period          : {out['period_s']*1e9:.1f} ns")
-        #     print("=" * 32)
-
-        #     print("\n=== Sync / Trigger Mode ===")
-        #     print(f"Mode            : {sync['mode']}")
-        #     # print(f"0x75 OscClkMux  : {sync['osc_clk_mux']}  ({'External' if sync['osc_clk_mux'] else 'Internal'})")
-        #     # print(f"0x55 MuxRateClk : {sync['rate_clk']}")
-        #     # print(f"0x54 MuxStartTrg: {sync['start_trg']}")
-        #     print("=" * 32)
-
-        #     print("\n=== Live Frequencies ===")
-        #     print(f"Current mode    : {live['mode']}")
-        #     if live['clk_in_hz'] is not None:
-        #         print(f"CLK IN  (0x76)  : {live['clk_in_hz']/1000:.2f} kHz")
-        #     if live['sync_in_hz'] is not None:
-        #         print(f"SYNC IN (0x77)  : {live['sync_in_hz']/1000:.2f} kHz")
-        #     print("=" * 32)
-
-        #     print("\n=== Burst / Config Mode ===")
-        #     print(f"Mode            : {conf['mode']}")
-        #     # print(f"MuxConfSw (0x52): {conf['mux_conf_sw']}")
-        #     # print(f"MuxBurstT (0x53): {conf['mux_burst_t']}")
-        #     print(f"Burst count     : {conf['burst_count']}")
-        #     # print(f"Fdiv (0x69)     : {conf['fdiv']}")
-        #     print(f"Description     : {conf['description']}")
-        #     print("=" * 32)
-        # except Exception as e:
-        #     print("Error:", e)
-
-        # no need for finally/ser.close() – the with statement closes it automatically
-
-        # You can now use osc_mhz for further calculations
-        # e.g. ratediv = get_ratediv(ser)   # if you want the full calculator
-
+    
         
         #run_sequence(ser,ONESHOT_TRIGGER_SMARTTRIG)
         #run_sequence(ser,PRESET1_CHANNEL_SEQUENCE)
