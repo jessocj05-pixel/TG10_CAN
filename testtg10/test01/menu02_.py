@@ -124,6 +124,43 @@ def update_current_config(seq):
     for reg, data in seq:
         if data is not None:
             state["current_config"][reg] = data
+from registers_ import _REG_NAMES
+
+def show_current_config():
+    """Display the complete configuration currently accumulated."""
+    config = state["current_config"]
+
+    if not config:
+        print("\n!! No current configuration.")
+        print("   Configure Sync / Freq / Config / Delay / Output first.")
+        return
+
+    print("\n--- Current Configuration ---")
+    print(f"Total registers: {len(config)}")
+
+    # current_config is {reg: data}
+    for reg, data in config.items():
+        reg_name = _REG_NAMES.get(reg, f"reg_0x{reg:02X}")
+
+        if data is None:
+            print(
+                f"  (0x{reg:02X}, None)"
+                f"  # {reg_name} = <READ>"
+            )
+        else:
+            if len(data) <= 4:
+                val = int.from_bytes(data, "little")
+                print(
+                    f"  (0x{reg:02X}, {data.hex():<10s})"
+                    f"  # {reg_name} = {val}"
+                )
+            else:
+                print(
+                    f"  (0x{reg:02X}, {data.hex()})"
+                    f"  # {reg_name}"
+                )
+
+    print("--- End Current Configuration ---")
 
 def require_sync() -> bool:
     if state["trig_mode"] is None:
@@ -185,7 +222,7 @@ def menu_sync():
         state["trig_mode"] = "clkin"
         state["ext_clk_hz"] = fext
         state["f_hz"] = cfg.f_hz
-        state["syncin_hz"] = syncin_hz
+        state["syncin_hz"] = None
         update_current_config(seq)
         print_sequence(seq, "external CLKIN")
 
@@ -470,7 +507,7 @@ def _ask_sr_source(prompt: str, default: int) -> int:
         if 0 <= val <= 15:
             return val
         raise ValueError(f"source code must be 0-15, got {val}")
-    matches = [(code, name) for code, name in SR_SOURCE_MAP if raw in name.lower()]
+    matches = [(code, name) for name, code in SR_SOURCE_MAP if raw in name.lower()]
     if not matches:
         raise ValueError(f"unknown source {raw!r} – use 0-15 or a name from the list")
     matches.sort(key=lambda x: len(x[1]), reverse=True)
@@ -561,14 +598,33 @@ def menu_output():
 def menu_monitor():
     print("\n--- Monitor ---")
     print("(Offline mode – no CAN connected)")
-    print("Later this will read:")
-    print("  Command, CLKvalid, PLL1locked, ErrorCode, …")
-    print(f"Current state snapshot:")
-    for k, v in state.items():
-        if k == "last_seq":
-            print(f"  last_seq : {len(v)} items")
-        else:
-            print(f"  {k:12s}: {v}")
+
+    print("\nSystem:")
+    print(f"  Trigger mode : {state['trig_mode'] or '--'}")
+
+    if state["f_hz"]:
+        print(f"  System clock : {state['f_hz'] / 1e9:.3f} GHz")
+    else:
+        print("  System clock : --")
+
+    if state["ext_clk_hz"]:
+        print(f"  CLK IN       : {state['ext_clk_hz'] / 1e6:.3f} MHz")
+    else:
+        print("  CLK IN       : --")
+
+    if state.get("syncin_hz"):
+        print(f"  SYNC IN      : {state['syncin_hz'] / 1e6:.3f} MHz")
+    else:
+        print("  SYNC IN      : --")
+
+    print(f"  Config mode  : {state['config_mode']}")
+    print(f"  Armed        : {'YES' if state['armed'] else 'NO'}")
+
+    print("\nConfiguration:")
+    print(f"  Registers    : {len(state['current_config'])}")
+    print(f"  Delay chans  : {len(state['delay'])}")
+    print(f"  Post-delay   : {len(state['postdelay'])}")
+    print(f"  Last op      : {len(state['last_seq'])} writes")
 
 
 # ===========================================================================
@@ -666,8 +722,12 @@ def menu_load_preset():
 
     name = preset_names[index]
     seq = presets[name]
+    state["current_config"] = {}
 
-    state["last_seq"] = seq
+    for reg, data in seq:
+        if data is not None:
+            state["current_config"][reg] = data
+    state["last_seq"] = list(seq)
 
     print(f"\nLoaded preset: {name}")
     print(f"Sequence contains {len(seq)} entries")
@@ -683,6 +743,7 @@ def menu_other():
     print("1) One-shot FIRE (software) – pulse once")
     print("2) One-shot FIRE (smart) – pulse once")
     print("3) Re-print last sequence")
+    print("4) Show current configuration")
     choice = ask("choose", default="3")
 
     if choice == "1":
@@ -702,6 +763,8 @@ def menu_other():
             print_sequence(state["last_seq"], "last sequence")
         else:
             print("!! nothing stored yet")
+    elif choice == "4":
+        show_current_config()
     else:
         print("invalid choice")
 
