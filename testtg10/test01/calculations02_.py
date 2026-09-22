@@ -146,29 +146,74 @@ def clock_internal_100mhz():
 
 
 def clock_external(fext_hz, *, force_vco=None):
-    """First N in table that lands in preferred VCO window. VERIFIED ranges."""
-    fext_hz = int(round(fext_hz))
+    """Configure PLL2 for an external clock using the OEM N-selection procedure."""
+
+    fext_hz = float(fext_hz)
+
     if not (20_000_000 <= fext_hz <= 100_000_000):
-        raise SyError(f"Fext {fext_hz} Hz out of range [20e6, 100e6]")
+        raise SyError(
+            f"Fext {fext_hz} Hz out of range [20e6, 100e6]"
+        )
+
     osc_reg = round(fext_hz / 1_000_000)
 
-    def _search(lo, hi, vco_reg):
-        for n in _N_TABLE:
-            f_calc = n * fext_hz
-            if lo <= f_calc <= hi:
-                return ClockConfig(n, vco_reg, f_calc, osc_reg, 1)
+    def _search(target_hz, lo, hi, vco_reg):
+        # OEM: calculate N ~= target frequency / external clock
+        target_n = target_hz / fext_hz
+
+        # Choose the closest allowed N
+        n = min(
+            _N_TABLE,
+            key=lambda candidate: abs(candidate - target_n)
+        )
+
+        # Actual system frequency
+        f_calc = n * fext_hz
+
+        # Check VCO/system-frequency window
+        if lo <= f_calc <= hi:
+            return ClockConfig(
+                n,
+                vco_reg,
+                f_calc,
+                osc_reg,
+                1
+            )
+
         return None
 
-    if force_vco == 0:
-        result = _search(_F25_LO, _F25_HI, 0)
-    elif force_vco == 1:
-        result = _search(_F3_LO, _F3_HI, 1)
-    else:
-        result = _search(_F3_LO, _F3_HI, 1) or _search(_F25_LO, _F25_HI, 0)
-    if result is None:
-        raise SyError(f"No PLL2 N for Fext={fext_hz} Hz")
-    return result
+    # 3 GHz VCO
+    if force_vco == 1:
+        result = _search(
+            3_000_000_000,
+            _F3_LO,
+            _F3_HI,
+            1
+        )
 
+    # 2.5 GHz VCO
+    elif force_vco == 0:
+        result = _search(
+            2_500_000_000,
+            _F25_LO,
+            _F25_HI,
+            0
+        )
+
+    # Automatic: try 3 GHz first, then 2.5 GHz
+    else:
+        result = (
+            _search(3_000_000_000, _F3_LO, _F3_HI, 1)
+            or
+            _search(2_500_000_000, _F25_LO, _F25_HI, 0)
+        )
+
+    if result is None:
+        raise SyError(
+            f"No PLL2 configuration for Fext={fext_hz} Hz"
+        )
+
+    return result
 #@degub_ndiv
 def calc_pll2_n(ext_clk_mhz, target_mhz=3000):
     """Nearest N to ideal — diagnostic only. Prefer clock_external() for config."""
@@ -545,3 +590,22 @@ def check_pll1_lock(pll1_byte, required=False):
         state = PLL1_STATES.get(pll1_byte, f"UNKNOWN(0x{pll1_byte:02X})")
         raise RuntimeError(f"PLL1 not locked: {state} - refuse Command=ON")
     return ok
+if __name__ == "__main__":
+    for f in [
+        20e6, 21e6, 22e6, 24e6, 25e6,
+        30e6, 40e6, 50e6, 60e6, 75e6, 100e6
+    ]:
+        try:
+            c = clock_external(f)
+
+            print(
+                f"{f/1e6:6.1f} MHz -> "
+                f"N={c.n_divider:3d}, "
+                f"VCO={c.vco2_reg}, "
+                f"Fsys={c.f_hz/1e9:.6f} GHz"
+            )
+
+        except SyError as e:
+            print(
+                f"{f/1e6:6.1f} MHz -> ERROR: {e}"
+            )
