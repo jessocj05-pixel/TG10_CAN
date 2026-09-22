@@ -325,11 +325,11 @@ def calc_trigger_config(mode, period_s=None, ext_clk_hz=None,syncin_hz=None,rate
         return {
             "mux_rateclk": int(RateSource.SYNCIN),
             "mux_trigger": int(StartTrigger.RATE_DIVIDER),
-            "ratediv": check_range(ratediv, "rate_divider"),    
+            "ratediv": check_range("rate_divider",ratediv),    
         }
     if mode == "external_dual_in":
-        if period_s is None or ext_clk_hz is None:
-                    raise ValueError("external_clkin needs period_s + ext_clk_hz")
+        if period_s is None or ext_clk_hz is None or syncin_hz is None:
+                    raise ValueError("external_dual_in needs period_s + ext_clk_hz + syncin_hz")
         return {
             "mux_rateclk": int(RateSource.SYNCIN),
             "mux_trigger": int(StartTrigger.RATE_DIV_OPTCLK),
@@ -353,29 +353,50 @@ class DelayRegs:
 
 def delay_calc_fullres(f_hz, time_s):
     """Datasheet: DelayCounter = floor(TCount), TCount = (F/28)*t.
+
     D/A from fractional part. VERIFIED formula; clamps for GUI.
     """
+
     t_count = f28_hz(f_hz) * time_s
-    dc_float = math.floor(t_count)  # exact datasheet floor — no epsilon nudge
-    frac28 = (t_count - dc_float) * 28.0
+
+    dc_float = math.floor(t_count)
+
+    # Algebraically equivalent to:
+    # (TCount - floor(TCount)) * 28
+    # but avoids floating-point error around integer D-delay boundaries.
+    frac28 = (f_hz * time_s) - (dc_float * 28.0)
+
     d_delay = int(frac28 + 4.0)
-    a_delay = int((frac28 - math.floor(frac28)) * 13.0)
+
+    a_delay = int(
+        (frac28 - math.floor(frac28)) * 13.0
+    )
+
     delay_counter = int(dc_float)
+
     clamped = False
+
     if delay_counter < 3:
         delay_counter, clamped = 3, True
     elif delay_counter > 16777218:
         delay_counter, clamped = 16777218, True
+
     if d_delay < 4:
         d_delay, clamped = 4, True
     elif d_delay > 32:
         d_delay, clamped = 32, True
+
     if a_delay > 23:
         a_delay, clamped = 23, True
     elif a_delay < 0:
         a_delay, clamped = 0, True
-    return DelayRegs(delay_counter, d_delay, a_delay, clamped)
 
+    return DelayRegs(
+        delay_counter,
+        d_delay,
+        a_delay,
+        clamped
+    )
 
 def delay_calc_ch4(time_s):
     """CH4: 100 MHz / 10 ns DelayCounter only — no A/D registers (datasheet text).
@@ -590,22 +611,707 @@ def check_pll1_lock(pll1_byte, required=False):
         state = PLL1_STATES.get(pll1_byte, f"UNKNOWN(0x{pll1_byte:02X})")
         raise RuntimeError(f"PLL1 not locked: {state} - refuse Command=ON")
     return ok
+#-------------------------------------------------------------------------------------------------------------------------------------------------------------------
 if __name__ == "__main__":
-    for f in [
-        20e6, 21e6, 22e6, 24e6, 25e6,
-        30e6, 40e6, 50e6, 60e6, 75e6, 100e6
-    ]:
-        try:
-            c = clock_external(f)
+    
+    # for vco in [None, 0, 1]:
+    #     try:
+    #         c = clock_external(25e6, force_vco=vco)
+    #         print(
+    #             f"force_vco={vco} -> "
+    #             f"N={c.n_divider}, "
+    #             f"VCO={c.vco2_reg}, "
+    #             f"Fsys={c.f_hz/1e9:.6f} GHz"
+    #         )
+    #     except SyError as e:
+    #         print(f"force_vco={vco} -> ERROR: {e}")
+    # print(system_clock_hz("internal"))
+    # print(system_clock_hz("external", n_div=120, ext_clk_hz=25e6))
+    # print(clock_external(20e6))
+    # print(rate_divider_from_period_ext(50e-6, 20e6))
+    # print(rate_divider_from_period_ext(50e-6, 25e6))
+    # print(rate_divider_from_period_ext(100e-6, 20e6))
+    # print(period_ext_from_rate_divider(1000, 20e6))
+    # print(period_ext_from_rate_divider(1250, 25e6))
+    # print(rate_divider_from_period_100m(100))
+    # print(rate_divider_from_period_100m(1000))
+    # print(period_100m_from_rate_divider(10))
+    # print(period_100m_from_rate_divider(1000))
+    
 
-            print(
-                f"{f/1e6:6.1f} MHz -> "
-                f"N={c.n_divider:3d}, "
-                f"VCO={c.vco2_reg}, "
-                f"Fsys={c.f_hz/1e9:.6f} GHz"
-            )
+    # cfg = calc_trigger_config(
+    #     "external_dual_in",
+    #     period_s=10e-6,     # 10 us
+    #     ext_clk_hz=20e6,    # CLK IN = 20 MHz
+    #     syncin_hz=20e6      # SYNC IN = 20 MHz
+    # )
 
-        except SyError as e:
-            print(
-                f"{f/1e6:6.1f} MHz -> ERROR: {e}"
-            )
+    # print(cfg)
+    # cfg = calc_trigger_config(
+    # "external_dual_in",
+    # period_s=10e-6,
+    # ext_clk_hz=100e6,
+    # syncin_hz=20e6
+    # )
+
+    # print(cfg)
+    # print(delay_calc_fullres(3_000_000_000, 100e-9))
+    # print(delay_calc_fullres(3_000_000_000, 1e-6))
+    # print(delay_calc_fullres(3_000_000_000, 10e-6))   
+    # print(delay_calc_ch4(100e-9))
+    # print(delay_calc_ch4(1e-6))
+    # print(delay_calc_ch4(10e-6)) 
+    # print(delay_calc_fullres(3_000_000_000, 0))
+    # print(delay_calc_fullres(3_000_000_000, 1e-12))
+    # print(delay_calc_fullres(3_000_000_000, 1e-9))
+    # print(delay_calc_ch4(0))
+    # print(delay_calc_ch4(1e-12))
+    # print(delay_calc_ch4(1e-9))
+    # print(post_delay_calc(3_000_000_000, 100e-9))
+    # print(post_delay_calc(3_000_000_000, 1e-6))
+    # print(post_delay_calc(3_000_000_000, 10e-6))
+    # print(post_delay_calc(100_000_000, 100e-9))
+    # print(post_delay_calc(100_000_000, 1e-6))
+    # print(calc_f_div(1))
+    # print(calc_f_div(2))
+    # print(calc_f_div(100))
+    # print(calc_f_div(65535))
+    # print(calc_f_div(0))
+    # print(calc_f_div(70000))
+    # print(calc_f_div(-10))
+    # print("\n" + "=" * 70)
+    # print("SY4000 CALCULATION SOFTWARE TEST")
+    # print("=" * 70)
+
+
+    # # ============================================================
+    # # 1. WATCHDOG
+    # # ============================================================
+
+    # print("\n[1] WATCHDOG")
+    # print("-" * 70)
+
+    # tests = [
+    #     ("20 ns, 100 ns", watchdog_calc(20e-9, 100e-9)),
+    #     ("1 us, 10 us", watchdog_calc(1e-6, 10e-6)),
+    #     ("0 s, 0 s", watchdog_calc(0, 0)),
+    # ]
+
+    # for name, result in tests:
+    #     print(f"{name:20s} -> {result}")
+
+    # print("\ncalc_watchdog_period()")
+
+    # print("20 ns  ->", calc_watchdog_period(period_s=20e-9))
+    # print("1 us   ->", calc_watchdog_period(period_s=1e-6))
+    # print("1 MHz   ->", calc_watchdog_period(freq_hz=1e6))
+    # print("10 MHz  ->", calc_watchdog_period(freq_hz=10e6))
+
+    # print("\nInvalid watchdog tests:")
+
+    # try:
+    #     calc_watchdog_period()
+    # except Exception as e:
+    #     print("No arguments       ->", type(e).__name__, e)
+
+    # try:
+    #     calc_watchdog_period(freq_hz=1e6, period_s=1e-6)
+    # except Exception as e:
+    #     print("Both arguments     ->", type(e).__name__, e)
+
+
+    # # ============================================================
+    # # 2. DAC
+    # # ============================================================
+
+    # print("\n[2] DAC")
+    # print("-" * 70)
+
+    # print("dac_code()")
+    # print("0 V          ->", dac_code(0))
+    # print("0.5 V        ->", dac_code(0.5))
+    # print("1.0 V        ->", dac_code(1.0))
+    # print("-1 V         ->", dac_code(-1))
+    # print("2 V          ->", dac_code(2))
+
+    # print("\ndac_voltage()")
+    # print("Code 0       ->", dac_voltage(0))
+    # print("Code 2048    ->", dac_voltage(2048))
+    # print("Code 4095    ->", dac_voltage(4095))
+
+    # print("\n2.5 V full-scale tests:")
+    # print("1.25 V       -> code", dac_code(1.25, 2.5))
+    # print("2.5 V        -> code", dac_code(2.5, 2.5))
+    # print("Code 2048    -> voltage", dac_voltage(2048, 2.5))
+    # print("Code 4095    -> voltage", dac_voltage(4095, 2.5))
+
+    # print("\nDAC configuration:")
+    # print(
+    #     calc_dac_config(
+    #         dac1_voltage=0.5,
+    #         dac2_voltage=0.75,
+    #         vmax=1.0
+    #     )
+    # )
+
+
+    # # ============================================================
+    # # 3. BURST COUNT
+    # # ============================================================
+
+    # print("\n[3] BURST COUNT")
+    # print("-" * 70)
+
+    # for value in [1, 10, 65535, 0, -10, 70000]:
+    #     print(f"Input {value:6d} -> {calc_burst_count(value)}")
+
+
+    # # ============================================================
+    # # 4. FDIV
+    # # ============================================================
+
+    # print("\n[4] FDIV")
+    # print("-" * 70)
+
+    # for value in [1, 2, 100, 65535, 0, 70000, -10]:
+    #     print(f"Input {value:6d} -> {calc_f_div(value)}")
+
+
+    # # ============================================================
+    # # 5. FDIV ACQ
+    # # ============================================================
+
+    # print("\n[5] FDIV ACQ")
+    # print("-" * 70)
+
+    # for value in [1, 2, 100, 32767, 0, 50000, -5]:
+    #     print(f"Input {value:6d} -> {calc_f_div_acq(value)}")
+
+
+    # # ============================================================
+    # # 6. EXTERNAL CLOCK
+    # # ============================================================
+
+    # print("\n[6] EXTERNAL CLOCK")
+    # print("-" * 70)
+
+    # external_clock_tests = [
+    #     20e6,
+    #     21e6,
+    #     22e6,
+    #     24e6,
+    #     25e6,
+    #     30e6,
+    #     40e6,
+    #     50e6,
+    #     60e6,
+    #     75e6,
+    #     100e6,
+    # ]
+
+    # for fext in external_clock_tests:
+    #     try:
+    #         cfg = clock_external(fext)
+
+    #         print(
+    #             f"{fext / 1e6:7.3f} MHz -> "
+    #             f"N={cfg.n_divider:3d}, "
+    #             f"VCO={cfg.vco2_reg}, "
+    #             f"Fsys={cfg.f_hz / 1e9:.6f} GHz, "
+    #             f"OscClock={cfg.oscillator_clock_reg} MHz, "
+    #             f"OscClkMux={cfg.optical_clock_mux}"
+    #         )
+
+    #     except Exception as e:
+    #         print(
+    #             f"{fext / 1e6:7.3f} MHz -> ERROR: "
+    #             f"{type(e).__name__}: {e}"
+    #         )
+
+
+    # print("\nExternal clock invalid-input tests:")
+
+    # for fext in [
+    #     19.999e6,
+    #     100.001e6,
+    #     0,
+    #     -10e6,
+    # ]:
+    #     try:
+    #         cfg = clock_external(fext)
+    #         print(
+    #             f"{fext / 1e6:10.3f} MHz -> "
+    #             "UNEXPECTED SUCCESS:", cfg
+    #         )
+
+    #     except Exception as e:
+    #         print(
+    #             f"{fext / 1e6:10.3f} MHz -> "
+    #             f"{type(e).__name__}: {e}"
+    #         )
+
+
+    # # ============================================================
+    # # 7. RATE DIVIDER
+    # # ============================================================
+
+    # print("\n[7] RATE DIVIDER")
+    # print("-" * 70)
+
+    # print("External CLKIN:")
+    # print(
+    #     "20 MHz, 50 us   ->",
+    #     rate_divider_from_period_ext(50e-6, 20e6)
+    # )
+
+    # print(
+    #     "20 MHz, 100 us  ->",
+    #     rate_divider_from_period_ext(100e-6, 20e6)
+    # )
+
+    # print(
+    #     "25 MHz, 50 us   ->",
+    #     rate_divider_from_period_ext(50e-6, 25e6)
+    # )
+
+    # print("\nReverse external CLKIN:")
+
+    # print(
+    #     "20 MHz, RD=1000  ->",
+    #     period_ext_from_rate_divider(1000, 20e6),
+    #     "seconds"
+    # )
+
+    # print(
+    #     "20 MHz, RD=2000  ->",
+    #     period_ext_from_rate_divider(2000, 20e6),
+    #     "seconds"
+    # )
+
+    # print("\nInternal 100 MHz:")
+
+    # print(
+    #     "100 ns  ->",
+    #     rate_divider_from_period_100m(100)
+    # )
+
+    # print(
+    #     "1000 ns ->",
+    #     rate_divider_from_period_100m(1000)
+    # )
+
+    # print("\nReverse internal 100 MHz:")
+
+    # print(
+    #     "RD=10  ->",
+    #     period_100m_from_rate_divider(10),
+    #     "ns"
+    # )
+
+    # print(
+    #     "RD=100 ->",
+    #     period_100m_from_rate_divider(100),
+    #     "ns"
+    # )
+
+
+    # # ============================================================
+    # # 8. FREQUENCY <-> PERIOD
+    # # ============================================================
+
+    # print("\n[8] FREQUENCY <-> PERIOD")
+    # print("-" * 70)
+
+    # print("Frequency -> Period:")
+
+    # for freq in [1e3, 1e6, 10e6]:
+    #     period = freq_to_period_s(freq)
+
+    #     print(
+    #         f"{freq / 1e3:g} kHz -> "
+    #         f"{period:.12g} s"
+    #     )
+
+    # print("\nPeriod -> Frequency:")
+
+    # for period in [1e-3, 1e-6, 100e-9]:
+    #     freq = period_to_freq_hz(period)
+
+    #     print(
+    #         f"{period:.12g} s -> "
+    #         f"{freq:.12g} Hz"
+    #     )
+
+
+    # # ============================================================
+    # # 9. DELAY CALCULATION
+    # # ============================================================
+
+    # print("\n[9] DELAY CALCULATION")
+    # print("-" * 70)
+
+    # delay_tests = [
+    #     (3e9, 0),
+    #     (3e9, 1e-12),
+    #     (3e9, 1e-9),
+    #     (3e9, 100e-9),
+    #     (3e9, 1e-6),
+    #     (3e9, 10e-6),
+    #     (2.48e9, 100e-9),
+    #     (3.04e9, 100e-9),
+    # ]
+
+    # for freq, time_s in delay_tests:
+
+    #     result = delay_calc_fullres(freq, time_s)
+
+    #     print(
+    #         f"F={freq / 1e9:.3f} GHz, "
+    #         f"T={time_s:.12g} s -> "
+    #         f"Counter={result.delay_counter}, "
+    #         f"D={result.d_delay}, "
+    #         f"A={result.a_delay}, "
+    #         f"clamped={result.clamped}"
+    #     )
+
+
+    # # ============================================================
+    # # 10. CH4 DELAY
+    # # ============================================================
+
+    # print("\n[10] CH4 DELAY")
+    # print("-" * 70)
+
+    # for time_s in [
+    #     0,
+    #     1e-12,
+    #     1e-9,
+    #     100e-9,
+    #     1e-6,
+    #     10e-6,
+    # ]:
+
+    #     result = delay_calc_ch4(time_s)
+
+    #     print(
+    #         f"T={time_s:.12g} s -> "
+    #         f"Counter={result.delay_counter}, "
+    #         f"D={result.d_delay}, "
+    #         f"A={result.a_delay}, "
+    #         f"clamped={result.clamped}"
+    #     )
+
+
+    # # ============================================================
+    # # 11. POST DELAY
+    # # ============================================================
+
+    # print("\n[11] POST DELAY")
+    # print("-" * 70)
+
+    # postdelay_tests = [
+    #     (3e9, 100e-9),
+    #     (3e9, 1e-6),
+    #     (3e9, 10e-6),
+    #     (100e6, 100e-9),
+    #     (100e6, 1e-6),
+    # ]
+
+    # for freq, width in postdelay_tests:
+
+    #     result = post_delay_calc(freq, width)
+
+    #     print(
+    #         f"F={freq / 1e9:.3f} GHz, "
+    #         f"Width={width:.12g} s -> "
+    #         f"PostDelay={result}"
+    #     )
+
+
+    # # ============================================================
+    # # 12. TRIGGER CONFIGURATION
+    # # ============================================================
+
+    # print("\n[12] TRIGGER CONFIGURATION")
+    # print("-" * 70)
+
+    # print("\nInternal 100 MHz:")
+    # try:
+    #     result = calc_trigger_config(
+    #         "internal_100mhz",
+    #         period_s=1e-6
+    #     )
+    #     print(result)
+    # except Exception as e:
+    #     print(type(e).__name__, e)
+
+
+    # print("\nExternal CLKIN:")
+    # try:
+    #     result = calc_trigger_config(
+    #         "external_clkin",
+    #         period_s=50e-6,
+    #         ext_clk_hz=20e6
+    #     )
+    #     print(result)
+    # except Exception as e:
+    #     print(type(e).__name__, e)
+
+
+    # print("\nExternal SYNCIN:")
+    # try:
+    #     result = calc_trigger_config(
+    #         "external_syncin",
+    #         ratediv=100
+    #     )
+    #     print(result)
+    # except Exception as e:
+    #     print(type(e).__name__, e)
+
+
+    # print("\nExternal DUAL:")
+    # try:
+    #     result = calc_trigger_config(
+    #         "external_dual_in",
+    #         period_s=10e-6,
+    #         ext_clk_hz=100e6,
+    #         syncin_hz=20e6
+    #     )
+    #     print(result)
+    # except Exception as e:
+    #     print(type(e).__name__, e)
+
+
+    # # ============================================================
+    # # 13. INVALID TRIGGER CONFIGURATION
+    # # ============================================================
+
+    # print("\n[13] INVALID TRIGGER CONFIGURATION")
+    # print("-" * 70)
+
+    # invalid_trigger_tests = [
+    #     (
+    #         "Internal without period",
+    #         lambda: calc_trigger_config(
+    #             "internal_100mhz"
+    #         )
+    #     ),
+    #     (
+    #         "CLKIN without ext clock",
+    #         lambda: calc_trigger_config(
+    #             "external_clkin",
+    #             period_s=50e-6
+    #         )
+    #     ),
+    #     (
+    #         "DUAL without SYNCIN",
+    #         lambda: calc_trigger_config(
+    #             "external_dual_in",
+    #             period_s=10e-6,
+    #             ext_clk_hz=100e6
+    #         )
+    #     ),
+    #     (
+    #         "Unknown mode",
+    #         lambda: calc_trigger_config(
+    #             "something_else"
+    #         )
+    #     ),
+    # ]
+
+    # for name, test in invalid_trigger_tests:
+
+    #     try:
+    #         result = test()
+
+    #         print(
+    #             f"{name:30s} -> "
+    #             f"UNEXPECTED SUCCESS: {result}"
+    #         )
+
+    #     except Exception as e:
+
+    #         print(
+    #             f"{name:30s} -> "
+    #             f"{type(e).__name__}: {e}"
+    #         )
+
+
+    # # ============================================================
+    # # 14. BURST MODE
+    # # ============================================================
+
+    # print("\n[14] BURST MODE")
+    # print("-" * 70)
+
+    # burst_tests = [
+    #     (1, 1),
+    #     (10, 2),
+    #     (100, 10),
+    #     (65535, 65535),
+    #     (0, 0),
+    #     (70000, 70000),
+    # ]
+
+    # for burst_n, fdiv_n in burst_tests:
+
+    #     result = calc_burst_mode(
+    #         burst_n,
+    #         fdiv_n
+    #     )
+
+    #     print(
+    #         f"Burst={burst_n:6d}, "
+    #         f"Fdiv={fdiv_n:6d} -> "
+    #         f"{result}"
+    #     )
+
+
+    # # ============================================================
+    # # END
+    # # ============================================================
+
+    # print("\n" + "=" * 70)
+    # print("ALL SOFTWARE CALCULATION TESTS COMPLETED")
+    # print("=" * 70)
+    import math
+
+
+    # def f28_hz(f_hz):
+    #     return f_hz / 28.0
+
+
+    # def delay_calc_fullres(f_hz, time_s):
+    #     """
+    #     Datasheet:
+    #         TCount = (F / 28) * t
+    #         DelayCounter = floor(TCount)
+
+    #         Ddelay = int((fractional_part * 28) + 4)
+    #         Adelay = int((fractional_part_of_28 * 13))
+    #     """
+
+    #     t_count = f28_hz(f_hz) * time_s
+
+    #     dc_float = math.floor(t_count)
+
+    #     frac28 = (t_count - dc_float) * 28.0
+
+    #     d_delay = int(frac28 + 4.0)
+
+    #     a_delay = int(
+    #         (frac28 - math.floor(frac28)) * 13.0
+    #     )
+
+    #     return dc_float, frac28, d_delay, a_delay
+
+
+    # # ============================================================
+    # # TEST ONLY THE PROBLEMATIC CASES
+    # # ============================================================
+
+    # tests = [
+    #     ("2.48 GHz / 100 ns", 2.48e9, 100e-9),
+    #     ("3.04 GHz / 100 ns", 3.04e9, 100e-9),
+    #     ("3.00 GHz / 100 ns", 3.00e9, 100e-9),
+    # ]
+
+    # print("=" * 70)
+    # print("DELAY CALCULATION FLOATING-POINT TEST")
+    # print("=" * 70)
+
+    # for name, f_hz, time_s in tests:
+
+    #     t_count, frac28, d_delay, a_delay = delay_calc_fullres(
+    #         f_hz, time_s
+    #     )
+
+    #     print(f"\n{name}")
+    #     print("-" * 70)
+
+    #     print(f"F             = {f_hz:.12f} Hz")
+    #     print(f"T             = {time_s:.12e} s")
+
+    #     print(f"TCount        = {t_count:.17f}")
+    #     print(f"floor(TCount) = {math.floor(t_count)}")
+
+    #     print(f"frac28        = {frac28:.17f}")
+    #     print(f"frac28 + 4    = {frac28 + 4.0:.17f}")
+
+    #     print(f"D-delay       = {d_delay}")
+    #     print(f"A-delay       = {a_delay}")
+    # import math
+
+
+    # def f28_hz(f_hz):
+    #     return f_hz / 28.0
+
+
+    # for f_hz in [2.48e9, 3.04e9, 3.00e9]:
+
+    #     time_s = 100e-9
+
+    #     t_count = f28_hz(f_hz) * time_s
+    #     dc_float = math.floor(t_count)
+
+    #     difference = t_count - dc_float
+    #     frac28 = difference * 28.0
+
+    #     print("\nF =", f_hz)
+
+    #     print("repr(t_count)      =", repr(t_count))
+    #     print("repr(dc_float)     =", repr(dc_float))
+    #     print("repr(difference)   =", repr(difference))
+    #     print("repr(frac28)       =", repr(frac28))
+
+    #     print("hex(t_count)       =", t_count.hex())
+    #     print("hex(difference)    =", difference.hex())
+    #     print("hex(frac28)        =", frac28.hex())
+    # import math
+
+
+    # def f28_hz(f_hz):
+    #     return f_hz / 28.0
+
+
+    # def delay_calc_test(f_hz, time_s):
+    #     t_count = f28_hz(f_hz) * time_s
+    #     dc = math.floor(t_count)
+
+    #     frac28 = (f_hz * time_s) - (dc * 28.0)
+
+    #     d_delay = int(frac28 + 4.0)
+
+    #     a_delay = int(
+    #         (frac28 - math.floor(frac28)) * 13.0
+    #     )
+
+    #     return t_count, dc, frac28, d_delay, a_delay
+
+
+    # tests = [
+    #     ("3 GHz / 105.5 ns", 3.0e9, 105.5e-9),
+    #     ("3 GHz / 106.0 ns", 3.0e9, 106.0e-9),
+    #     ("3 GHz / 106.5 ns", 3.0e9, 106.5e-9),
+    #     ("3 GHz / 107.0 ns", 3.0e9, 107.0e-9),
+
+    #     ("2.48 GHz / 100.5 ns", 2.48e9, 100.5e-9),
+    # ]
+
+
+    # print("=" * 70)
+    # print("DELAY CALCULATION — FRACTIONAL A-DELAY TEST")
+    # print("=" * 70)
+
+    # for name, f_hz, time_s in tests:
+
+    #     t_count, dc, frac28, d_delay, a_delay = \
+    #         delay_calc_test(f_hz, time_s)
+
+    #     print(f"\n{name}")
+    #     print("-" * 70)
+    #     print("TCount        =", repr(t_count))
+    #     print("Counter       =", dc)
+    #     print("frac28        =", repr(frac28))
+    #     print("D-delay       =", d_delay)
+    #     print("A-delay       =", a_delay)

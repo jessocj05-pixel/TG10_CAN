@@ -752,14 +752,39 @@ def seq_run_off() -> Sequence:
 
 
 if __name__ == "__main__":
-    def _print_seq(name, seq):
-        print(f"\n=== {name} ===")
-        for reg, data in seq:
-            if data is None:
-                print(f"  (0x{reg:02X}, None)                       # READ")
-            else:
-                print(f"  (0x{reg:02X}, {data.hex()})")
+    # def _print_seq(name, seq):
+    #     print(f"\n=== {name} ===")
+    #     for reg, data in seq:
+    #         if data is None:
+    #             print(f"  (0x{reg:02X}, None)                       # READ")
+    #         else:
+    #             print(f"  (0x{reg:02X}, {data.hex()})")
 
-    _print_seq("internal 100 MHz", seq_internal_100mhz())
-    _print_seq("external CLKIN", seq_external_clkin(100, 30, 1, 1))
-    _print_seq("OUT0 config2", seq_out0_config2_del0_del1())
+    # _print_seq("internal 100 MHz", seq_internal_100mhz())
+    # _print_seq("external CLKIN", seq_external_clkin(100, 30, 1, 1))
+    # _print_seq("OUT0 config2", seq_out0_config2_del0_del1())
+    # print("\n--- 20 MHz External CLKIN ---")
+
+    # seq = build_external_clkin_from_period(
+    #     period_s=50e-6,   # 50 us -> expected 20 kHz
+    #     fext_hz=20e6,
+    #     command_on=False,
+    #     include_readback=True,
+    # )
+
+    # for reg, data in seq:
+    #     if data is None:
+    #         print(f"REG 0x{reg:02X} -> READ")
+    #     else:
+    #         print(f"REG 0x{reg:02X} -> {data.hex()}")
+    seq = build_external_dual_in_from_period(
+            period_s=10e-6,
+            fext_hz=100e6,
+            syncin_hz=20e6,
+        )
+    
+    for reg, data in seq:
+        if data is None:
+            print(f"REG 0x{reg:02X} -> READ")
+        else:
+            print(f"REG 0x{reg:02X} -> {data.hex()}")
