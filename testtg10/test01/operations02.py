@@ -474,48 +474,6 @@ def seq_channels(
     return seq
 
 
-def seq_preset1_original() -> Sequence:
-    """Exact reproduction of the original PRESET1_CHANNEL_SEQUENCE."""
-    return [
-        # --- Delay counters ---
-        (0x80, _u32(3)),                            # DelayCnt0 = 3
-        (0x16, _u32(4)),                            # DelayCnt1 = 4
-        (0x19, _u32(35)),                           # DelayCnt2 = 35
-        (0x1A, _u32(67)),                           # DelayCnt3 = 67
-        (0x1B, _u32(93)),                           # DelayCnt4 = 93
-        (0x1C, _u32(3)),                            # DelayCnt5 = 3
-        (0x1D, _u32(3)),                            # DelayCnt6 = 3
-        (0x1E, _u32(3)),                            # DelayCnt7 = 3
-        # --- Post counts ---
-        (0x26, _u16(32)),                           # PostCnt0 = 32
-        (0x27, _u16(11)),                           # PostCnt1 = 11
-        (0x28, _u16(32)),                           # PostCnt2 = 32
-        (0x29, _u16(32)),                           # PostCnt3 = 32
-        (0x2A, _u16(30)),                           # PostCnt4 = 30
-        (0x2B, _u16(54)),                           # PostCnt5 = 54
-        (0x2C, _u16(64)),                           # PostCnt6 = 64
-        (0x2D, _u16(75)),                           # PostCnt7 = 75
-        # --- SR block 0 ---
-        (0x2E, _u8(0x03)),                          # MuxSetConf10 = Fine del0
-        (0x2F, _u8(0x03)),                          # MuxSetConf20 = Fine del0
-        (0x30, _u8(0x02)),                          # MuxResConf10 = Post-count
-        (0x31, _u8(0x02)),                          # MuxResConf20 = Post-count
-        # --- A-delays ---
-        (0x56, _u8(0x00)),                          # Adly0 = 0
-        (0x57, _u8(0x0D)),                          # Adly1 = 13
-        (0x58, _u8(0x00)),                          # Adly2 = 0
-        (0x59, _u8(0x00)),                          # Adly3 = 0
-        (0x5A, _u8(0x00)),                          # Adly4 = 0
-        (0x5B, _u8(0x01)),                          # Adly5 = 1
-        (0x5C, _u8(0x01)),                          # Adly6 = 1
-        # --- D-delays ---
-        (0x5D, _u8(0x04)),                          # Ddly0 = 4
-        (0x5E, _u8(0x05)),                          # Ddly1 = 5
-        (0x5F, _u8(0x08)),                          # Ddly2 = 8
-        (0x60, _u8(0x0C)),                          # Ddly3 = 12
-        (0x62, _u8(0x04)),                          # Ddly5 = 4
-        (0x63, _u8(0x04)),                          # Ddly6 = 4
-    ]
 
 
 def seq_delay_preset(channels: Dict[int, Dict[str, int]]) -> Sequence:
@@ -782,7 +740,7 @@ def seq_run_off() -> Sequence:
 # ONESHOT_TRIGGER_SOFTWARETRIG                → seq_oneshot_software
 # ONESHOT_TRIGGER_SMARTTRIG                   → seq_oneshot_smart   (legacy)
 # FREQ_10KHZ                                  → seq_set_ratediv
-# PRESET1_CHANNEL_SEQUENCE                    → seq_preset1_original
+# PRESET1_CHANNEL_SEQUENCE                    → inside saved presets
 # CONFIG_NORMAL / GATE / N_GATE / BURST_*     → seq_config_*
 # CONFIG_FREQ_DIV                             → seq_config_freq_div
 # DELAY_PRESET_DEL / POSTDELAY_PRESET         → seq_delay_preset / seq_postdelay_preset
@@ -804,5 +762,4 @@ if __name__ == "__main__":
 
     _print_seq("internal 100 MHz", seq_internal_100mhz())
     _print_seq("external CLKIN", seq_external_clkin(100, 30, 1, 1))
-    _print_seq("preset1 original", seq_preset1_original())
     _print_seq("OUT0 config2", seq_out0_config2_del0_del1())

@@ -34,7 +34,6 @@ from operations02 import (
     build_delay_channel,
     build_post_delay_channel,
     seq_channels,
-    seq_preset1_original,
     seq_delay_channel,
     seq_post_delay_channel,
     # Config
@@ -85,6 +84,7 @@ state = {
     "delay": {},             # ch → last delay time_s
     "postdelay": {},         # ch → last width_s
     "last_seq": [],          # most recent sequence (for save / re-print)
+    "current_config" : {},
 }
 
 
@@ -114,6 +114,16 @@ def print_sequence(seq, label: str = "sequence"):
     print("--- end ---")
     state["last_seq"] = list(seq)
 
+def update_current_config(seq):
+    """
+    Add/update persistent configuration writes.
+
+    If the same register is written again, the newer value replaces
+    the previous value in the saved configuration.
+    """
+    for reg, data in seq:
+        if data is not None:
+            state["current_config"][reg] = data
 
 def require_sync() -> bool:
     if state["trig_mode"] is None:
@@ -155,6 +165,8 @@ def menu_sync():
         state["trig_mode"] = "internal"
         state["f_hz"] = 3_000_000_000
         state["ext_clk_hz"] = None
+        state["syncin_hz"] = None
+        update_current_config(seq)
         print_sequence(seq, "internal 100 MHz")
 
     elif choice == "2":
@@ -173,6 +185,8 @@ def menu_sync():
         state["trig_mode"] = "clkin"
         state["ext_clk_hz"] = fext
         state["f_hz"] = cfg.f_hz
+        state["syncin_hz"] = syncin_hz
+        update_current_config(seq)
         print_sequence(seq, "external CLKIN")
 
     elif choice == "3":
@@ -182,6 +196,8 @@ def menu_sync():
         state["trig_mode"] = "syncin"
         state["f_hz"] = 3_000_000_000
         state["ext_clk_hz"] = None
+        state["syncin_hz"] = None
+        update_current_config(seq)
         print_sequence(seq, "external SYNCIN")
         print("(RateDiv can still be changed later via menu 2 Freq/Period)")
 
@@ -202,14 +218,18 @@ def menu_sync():
         state["trig_mode"] = "dual"
         state["ext_clk_hz"] = fext
         state["f_hz"] = cfg.f_hz
+        state["syncin_hz"] = syncin_hz
+        update_current_config(seq)
         print_sequence(seq, "external DUAL IN")
 
     elif choice == "5":
         seq = seq_oneshot_software()
+        update_current_config(seq)
         print_sequence(seq, "one-shot FIRE (software)")
 
     elif choice == "6":
         seq = seq_oneshot_smart()
+        update_current_config(seq)
         print_sequence(seq, "one-shot FIRE (smart)")
 
     else:
@@ -237,8 +257,17 @@ def menu_freq():
 
     if state["trig_mode"] == "internal":
         ratediv = rate_divider_from_period_100m(period_s * 1e9)
-    elif state["trig_mode"] in ("clkin", "dual") and state["ext_clk_hz"]:
-        ratediv = rate_divider_from_period_ext(period_s, state["ext_clk_hz"])
+    elif state["trig_mode"] == "clkin" and state["ext_clk_hz"]:
+        ratediv = rate_divider_from_period_ext(
+            period_s,
+            state["ext_clk_hz"]
+        )
+
+    elif state["trig_mode"] == "dual" and state["syncin_hz"]:
+        ratediv = rate_divider_from_period_ext(
+            period_s,
+            state["syncin_hz"]
+        )
     else:
         use = ask("Calculate from 100 MHz (1) or enter RateDiv raw (2)?", default="1")
         if use == "2":
@@ -247,6 +276,7 @@ def menu_freq():
             ratediv = rate_divider_from_period_100m(period_s * 1e9)
 
     seq = seq_set_ratediv(ratediv)
+    update_current_config(seq)
     print_sequence(seq, f"RateDiv = {ratediv}")
 
 
@@ -268,36 +298,44 @@ def menu_config():
 
     if choice == "1":
         seq = seq_config_normal()
+        update_current_config(seq)
         state["config_mode"] = "normal"
     elif choice == "2":
         seq = seq_config_gate()
+        update_current_config(seq)
         state["config_mode"] = "gate"
     elif choice == "3":
         seq = seq_config_ngate()
+        update_current_config(seq)
         state["config_mode"] = "ngate"
     elif choice == "4":
         n = int(ask("Burst count", default="1"))
         fd = int(ask("Fdiv", default="1"))
         seq = seq_config_burst_syncin(n, fd)
+        update_current_config(seq)
         state["config_mode"] = "burst_syncin"
     elif choice == "5":
         n = int(ask("Burst count", default="100"))
         fd = int(ask("Fdiv", default="1"))
         seq = seq_config_burst_gate(n, fd)
+        update_current_config(seq)
         state["config_mode"] = "burst_gate"
     elif choice == "6":
         n = int(ask("Burst count", default="100"))
         fd = int(ask("Fdiv", default="1"))
         seq = seq_config_burst_ngate(n, fd)
+        update_current_config(seq)
         state["config_mode"] = "burst_ngate"
     elif choice == "7":
         n = int(ask("Burst count", default="100"))
         fd = int(ask("Fdiv", default="1"))
         seq = seq_config_burst_software(n, fd)
+        update_current_config(seq)
         state["config_mode"] = "burst_software"
     elif choice == "8":
         fd = int(ask("Fdiv", default="1"))
         seq = seq_config_freq_div(fd)
+        update_current_config(seq)
         state["config_mode"] = "fdiv"
     else:
         print("invalid choice")
@@ -379,6 +417,7 @@ def menu_delay():
             try:
                 seq = build_delay_channel(ch, t, f_hz)
                 state["delay"][ch] = t
+                update_current_config(seq)
                 print_sequence(seq, f"del{ch} = {_fmt_time(t)}")
             except ValueError as e:
                 print(f"!! {e}")
@@ -405,11 +444,9 @@ def menu_delay():
                 w = p_tmax
             seq = build_post_delay_channel(ch, w, f_hz)
             state["postdelay"][ch] = w
+            update_current_config(seq)
             print_sequence(seq, f"postdel{ch} = {_fmt_time(w)}")
 
-    elif choice == "3":
-        seq = seq_preset1_original()
-        print_sequence(seq, "PRESET1")
 
     else:
         print("invalid choice")
@@ -490,6 +527,7 @@ def menu_output():
             (name for name, code in SR_SOURCE_MAP.items() if code == r2),
             f"code_{r2}"
         )
+        update_current_config(seq)
         print_sequence(seq, f"OUT{ch}  rise={name_s2}  fall={name_r2}")
 
     elif choice.lower() == "a":
@@ -497,16 +535,19 @@ def menu_output():
         d2 = int(ask("DAC2 code 0-4095", default="4095"))
         src = int(ask("MuxDAC source (7=OUT7)", default="7"))
         seq = seq_out_anout_out7(dac1=d1, dac2=d2, mux_dac_src=src)
+        update_current_config(seq)
         print_sequence(seq, "analog out")
 
     elif choice.lower() == "p":
         src = int(ask("MuxPreT source (0=OUT0 …)", default="0"))
         seq = seq_out_pret(src)
+        update_current_config(seq)
         print_sequence(seq, "MuxPreT")
 
     elif choice.lower() == "c":
         src = int(ask("MuxTrg1Out source (8=OPTCLK)", default="8"))
         seq = seq_out_comt(src)
+        update_current_config(seq)
         print_sequence(seq, "MuxTrg1Out")
 
     else:
@@ -551,7 +592,7 @@ def _format_payload(data: bytes) -> str:
 
 
 def menu_save_preset():
-    if not state["last_seq"]:
+    if not state["current_config"]:
         print("!! No sequence to save – run an operation first")
         return
 
@@ -562,7 +603,7 @@ def menu_save_preset():
 
     path = "preset.py"
     lines = [f"\n{name} = [\n"]
-    for reg, data in state["last_seq"]:
+    for reg, data in state["current_config"].items():
         reg_name = _REG_NAMES.get(reg, f"reg_0x{reg:02X}")
         if data is None:
             lines.append(
@@ -578,7 +619,7 @@ def menu_save_preset():
 
     with open(path, "a") as f:
         f.writelines(lines)
-    print(f"Appended {name} ({len(state['last_seq'])} writes) → {path}")
+    print(f"Appended {name} ({len(state['current_config'])} registers) → {path}")
 
 def menu_load_preset():
     path = "preset.py"
@@ -700,7 +741,7 @@ MENU_TEXT = """
   5) Output
   6) Monitor
   7) Save preset
-  8)Load preset
+  8) Load preset
   9) Other
   r) Run/Stop
   q) Quit
