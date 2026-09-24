@@ -359,11 +359,10 @@ def delay_calc_fullres(f_hz, time_s):
 
     t_count = f28_hz(f_hz) * time_s
 
+    # Mathematical coarse count before the TG10 +3 programming offset
     dc_float = math.floor(t_count)
 
-    # Algebraically equivalent to:
-    # (TCount - floor(TCount)) * 28
-    # but avoids floating-point error around integer D-delay boundaries.
+    # Fractional part is calculated from the PRE-OFFSET coarse count
     frac28 = (f_hz * time_s) - (dc_float * 28.0)
 
     d_delay = int(frac28 + 4.0)
@@ -371,8 +370,9 @@ def delay_calc_fullres(f_hz, time_s):
     a_delay = int(
         (frac28 - math.floor(frac28)) * 13.0
     )
-
-    delay_counter = int(dc_float)
+    # TG10 hardware programming offset:
+    # programmed DelayCounter = mathematical coarse count + 3
+    delay_counter = int(dc_float) + 3
 
     clamped = False
 
@@ -383,8 +383,8 @@ def delay_calc_fullres(f_hz, time_s):
 
     if d_delay < 4:
         d_delay, clamped = 4, True
-    elif d_delay > 32:
-        d_delay, clamped = 32, True
+    elif d_delay > 31:
+        d_delay, clamped = 31, True
 
     if a_delay > 23:
         a_delay, clamped = 23, True
@@ -398,74 +398,94 @@ def delay_calc_fullres(f_hz, time_s):
         clamped
     )
 
-def delay_calc_ch4(time_s):
-    """CH4: 100 MHz / 10 ns DelayCounter only — no A/D registers (datasheet text).
-    HARDWARE-MAP DEPENDENT: do not add A-delay until register map confirms it.
-    """
-    cnt = int(round(time_s / 10e-9))
-    clamped = False
-    if cnt < 3:
-        cnt, clamped = 3, True
-    elif cnt > 16777218:
-        cnt, clamped = 16777218, True
-    return DelayRegs(cnt, None, None, clamped)
-#@ch4adelay channel4 uses adelay
-# def delay_calc_ch4(f_hz, time_s):
-#     """CH4: DelayCounter + A-delay.
-#     A-delay usage confirmed by hardware log.
+# def delay_calc_ch4(time_s):
+#     """CH4: 100 MHz / 10 ns DelayCounter only — no A/D registers (datasheet text).
+#     HARDWARE-MAP DEPENDENT: do not add A-delay until register map confirms it.
 #     """
-
-#     t_count = f28_hz(f_hz) * time_s
-
-#     delay_counter = math.floor(t_count)
-
-#     frac28 = (t_count - delay_counter) * 28.0
-
-#     a_delay = int(
-#         (frac28 - math.floor(frac28)) * 13.0
-#     )
-
+#     cnt = int(round(time_s / 10e-9))
 #     clamped = False
+#     if cnt < 3:
+#         cnt, clamped = 3, True
+#     elif cnt > 16777218:
+#         cnt, clamped = 16777218, True
+#     return DelayRegs(cnt, None, None, clamped)
+# @ch4adelay channel4 uses adelay
+def delay_calc_ch4(f_hz, time_s):
+    """CH4: DelayCounter + A-delay.
+    A-delay usage confirmed by hardware log.
+    """
 
-#     if delay_counter < 3:
-#         delay_counter, clamped = 3, True
-#     elif delay_counter > 16777218:
-#         delay_counter, clamped = 16777218, True
+    t_count = f28_hz(f_hz) * time_s
 
-#     if a_delay < 0:
-#         a_delay, clamped = 0, True
-#     elif a_delay > 23:
-#         a_delay, clamped = 23, True
+    delay_counter = math.floor(t_count)
 
-#     return DelayRegs(
-#         delay_counter,
-#         None,       # D-delay not confirmed for CH4
-#         a_delay,
-#         clamped
-#     )
+    frac28 = (t_count - delay_counter) * 28.0
+
+    a_delay = int(
+        (frac28 - math.floor(frac28)) * 13.0
+    )
+
+    clamped = False
+
+    if delay_counter < 3:
+        delay_counter, clamped = 3, True
+    elif delay_counter > 16777218:
+        delay_counter, clamped = 16777218, True
+
+    if a_delay < 0:
+        a_delay, clamped = 0, True
+    elif a_delay > 23:
+        a_delay, clamped = 23, True
+
+    return DelayRegs(
+        delay_counter,
+        None,       # D-delay not confirmed for CH4
+        a_delay,
+        clamped
+    )
 
 def delay_calc_ch67(f_hz, time_s):
     """Same math as fullres. Shared physical A/D is a sequence-layer concern."""
     return delay_calc_fullres(f_hz, time_s)
 
 
-def post_delay_calc(f_hz, pulse_width_s):
-    """round((F/28)*width), clamp [3,258]. NEEDS SOURCE CONFIRM on equation."""
-    return max(3, min(int(round(f28_hz(f_hz) * pulse_width_s)), 258))
+def post_delay_calc(channel, f_hz, pulse_width_s):
+    """
+    Calculate PostDel counter and actual representable time.
 
+    Channels 0,1,2,3,5,6,7:
+        PostCnt = round((F/28) * width)
+
+    Channel 4:
+        PostCnt = round(100 MHz * width)
+
+    Counter range: 3..258.
+    """
+
+    if channel == 4:
+        tick_hz = 100_000_000.0
+    else:
+        tick_hz = f28_hz(f_hz)
+
+    post_count = int(round(tick_hz * pulse_width_s))
+    post_count = max(3, min(post_count, 258))
+
+    actual_width_s = post_count / tick_hz
+
+    return post_count, actual_width_s
+
+# count, actual_s = post_delay_calc(0, 3e9, 100e-9)
 
 def calc_delay(time_s, f_hz, channel):
     if channel == 4:
-        r = delay_calc_ch4(time_s)
-        out = {"delay_counter": r.delay_counter}
-        # r = delay_calc_ch4(f_hz, time_s)
+        r = delay_calc_ch4(f_hz, time_s)
 
-        # out = {
-        #     "delay_counter": r.delay_counter,
-        # }
+        out = {
+            "delay_counter": r.delay_counter,
+        }
 
-        # if r.a_delay is not None:
-        #     out["a_delay"] = r.a_delay
+        if r.a_delay is not None:
+            out["a_delay"] = r.a_delay
     else:
         r = delay_calc_fullres(f_hz, time_s)
         out = {"delay_counter": r.delay_counter}
@@ -499,20 +519,30 @@ def max_delay_time_s(f_hz, channel=None):
     return hi * 10e-9 if channel == 4 else hi * 28 / float(f_hz)
 
 
-def calc_post_delay_checked(width_s, f_hz):
-    return post_delay_calc(f_hz, width_s)
+def calc_post_delay_checked(width_s, f_hz,channel):
+    return post_delay_calc(channel,f_hz, width_s)
 
 
-def calc_post_delay_clamped(width_s, f_hz):
-    return post_delay_calc(f_hz, width_s)
+def calc_post_delay_clamped(width_s, f_hz,channel):
+    return post_delay_calc(channel,f_hz, width_s)
+
+# count = calc_post_delay_checked(width_s, f_hz, channel)
+def min_post_delay_s(f_hz, channel=None):
+    lo = RANGES["post_delay"][0]
+
+    if channel == 4:
+        return lo / 100_000_000.0
+
+    return lo * 28 / float(f_hz)
 
 
-def min_post_delay_s(f_hz):
-    return RANGES["post_delay"][0] * 28 / float(f_hz)
+def max_post_delay_s(f_hz, channel=None):
+    hi = RANGES["post_delay"][1]
 
+    if channel == 4:
+        return hi / 100_000_000.0
 
-def max_post_delay_s(f_hz):
-    return RANGES["post_delay"][1] * 28 / float(f_hz)
+    return hi * 28 / float(f_hz)
 
 
 # ---------------------------------------------------------------------------
