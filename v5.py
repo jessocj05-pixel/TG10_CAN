@@ -18,7 +18,7 @@ from registers import describe_write
 from user import get_int, get_float, ratediv, ndiv, freq, tperiod
 # from user_calculation import read_osc_clk
 
-from readv1 import read_status, read_config, read_live, read_mux_delay, read_run_status, LiveMonitor, fmt_freq, dump_delay_regs, read_logic_out
+from readv1 import read_status, read_config, read_live, read_mux_delay, read_run_status, fmt_freq, dump_delay_regs, read_logic_out
 
 PORT = "COM11"          # change to your adapter's port, e.g. "/dev/ttyUSB0" on Linux
 BAUDRATE = 2000000      # adapter's serial baud (check your adapter config, common default)
