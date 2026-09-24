@@ -1,6 +1,7 @@
 # sy4000_status.py
 import time
 import serial
+import threading
 
 MODE_NAMES = {
     "internal":  "Internal",
@@ -70,6 +71,19 @@ def fmt_period(p):
     return f"{p:.6f} s"
 
 
+def fmt_delay(total_s: float, F: float) -> str:
+    """Pick display granularity like TG10 does: full/D+A/A-only."""
+    coarse_step = 28.0 / F      # ~9.33 ns
+    fine_step   = 1.0 / F       # ~0.333 ns
+
+    if total_s >= coarse_step:
+        return fmt_period(total_s)
+    elif total_s >= fine_step:
+        return f"{total_s*1e12:.2f} ps"
+    else:
+        return f"{total_s*1e12:.2f} ps"
+
+
 # ---------- main ----------
 def read_status(ser: serial.Serial, show: bool = True) -> dict:
     osc_mux   = _rd(ser, 0x75)   # 0 internal, 1 external
@@ -130,29 +144,7 @@ def read_status(ser: serial.Serial, show: bool = True) -> dict:
 
     if out_hz:
         out_t = 1.0 / out_hz
-    # # ----- 3. output frequency / period -----
-    # out_hz = out_t = ratediv = rate_clock_hz = None
-
-    # if mode in ("oneshot", "smart"):
-    #     pass                                        # no repetition rate
-    # elif start_trg in (2, 3):                       # trigger = SYNC IN directly
-    #     rate_clock_hz = sync_in_hz
-    #     out_hz = sync_in_hz
-    # else:
-    #     ratediv = max(1, _rd(ser, 0x20))
-    #     if rate_clk == 0:
-    #         rate_clock_hz = 100e6                   # internal rate clock fixed 10 ns
-    #     elif rate_clk == 1:
-    #         rate_clock_hz = _freq_hz(ser, 0x76)
-    #     elif rate_clk == 2:
-    #         rate_clock_hz = _freq_hz(ser, 0x76) / 2
-    #     else:
-    #         rate_clock_hz = _freq_hz(ser, 0x77)
-    #     out_hz = rate_clock_hz / ratediv
-
-    # if out_hz:
-    #     out_t = 1.0 / out_hz
-
+    
     res = dict(mode=MODE_NAMES[mode], mode_key=mode,
                osc_clk_mux=osc_mux, rate_clk=rate_clk, start_trg=start_trg,
                clk_in_hz=clk_in_hz, sync_in_hz=sync_in_hz,
@@ -173,18 +165,7 @@ def read_status(ser: serial.Serial, show: bool = True) -> dict:
         if sync_in_hz is not None:
             print(f"SYNC IN       : {fmt_freq(sync_in_hz)}")
         print("=" * 36)
-    # if show:
-    #     print("=" * 36)
-    #     print(f"Mode          : {res['mode']}")
-    #     print(f"Output freq   : {fmt_freq(out_hz)}")
-    #     print(f"Output period : {fmt_period(out_t)}")
-    #     if ratediv is not None:
-    #         print(f"Ratediv       : {ratediv}")
-    #     if clk_in_hz is not None:
-    #         print(f"{clk_label:<14}: {fmt_freq(clk_in_hz)}")
-    #     if sync_in_hz is not None:
-    #         print(f"SYNC IN       : {fmt_freq(sync_in_hz)}")
-    #     print("=" * 36)
+    
     return res
 
 
@@ -272,18 +253,18 @@ def _sys_clock_hz(ser):
 
 
 def _delay_seconds(ser, ch, F):
-    """Total delay of delay channel ch, in seconds. None if unknown."""
     r = DEL_REGS[ch]
     cnt = _rd(ser, r["cnt"])
-    if ch == 4:                                  # counts of 10 ns
-        return cnt * 10e-9 + (_rd(ser, r["a"]) * 25e-12 if r["a"] else 0)
-    t = cnt * 28.0 / F
+    if ch == 4:
+        a = _rd(ser, r["a"]) if r["a"] else 0
+        # return (cnt - 3) * 10e-9 + a * 25e-12     # ch4: 10ns/count, offset -3
+        return max((cnt - 3) * 10e-9 + a * 25e-12, 0.0)
+    t = (cnt - 3) * 28.0 / F                       # <-- offset -3 added
     if r["d"]:
-        t += (_rd(ser, r["d"]) - 4) / F          # D delay: 1/F units, offset 4
+        t += (_rd(ser, r["d"]) - 4) / F
     if r["a"]:
-        t += _rd(ser, r["a"]) * 25e-12           # A delay: 25 ps units
-    return t
-
+        t += _rd(ser, r["a"]) * 25e-12
+    return max(t, 0.0)                             # clamp, avoid tiny negative float noise
 
 def _src_text(ser, name, F, cache, block, kind):
     """kind = 'rise' or 'fall'"""
@@ -295,19 +276,25 @@ def _src_text(ser, name, F, cache, block, kind):
         key = ("post", block)
         if key not in cache:
             cnt = _rd(ser, 0x26 + block)        # PostCnt of the same block
-            cache[key] = cnt * 28.0 / F         # post counter unit = 28/F
+            if block == 4:
+                cache[key] = cnt * 10e-9          # ch4 domain: 100MHz, 10ns/count
+            else:
+                cache[key] = cnt * 28.0 / F        # reverted: no offset
+        #     cache[key] = cnt * 28.0 / F         # post counter unit = 28/F
         return f"Post-count ({fmt_period(cache[key])})"
+        #     cache[key] = max((cnt - 3) * 28.0 / F, 0.0)      # <-- offset -3 added
+        # return f"Post-count ({fmt_delay(cache[key], F)})"     # <-- also switch to fmt_delay for ps range
     if name.startswith(("Fine del", "Coarse del")):
         ch = int(name[-1])
         if ch not in cache:
             cache[ch] = _delay_seconds(ser, ch, F)
-        return f"{name} ({fmt_period(cache[ch])})"
+        return f"{name} ({fmt_delay(cache[ch], F)})"
+    for b in range(8):
+        print(f"block{b} PostCnt(0x{0x26+b:02X}) = {_rd(ser, 0x26+b)}")
     return name
 
 
-def read_mux_delay(ser: serial.Serial, blocks=range(8),
-                    show: bool = True) -> dict:
-    """Read rise (Mux set) and fall (Mux res) sources of each SR block."""
+def read_mux_delay(ser: serial.Serial, blocks=range(8), show: bool = True) -> dict:
     F = _sys_clock_hz(ser)
     cache = {}
     res = {}
@@ -320,18 +307,143 @@ def read_mux_delay(ser: serial.Serial, blocks=range(8),
             "res1": _rd(ser, base + 2),
             "res2": _rd(ser, base + 3),
         }
-        res[b] = {
+        block = {
             "conf1_rise": MUX_SET[raw["set1"] & 0x0F],
             "conf2_rise": MUX_SET[raw["set2"] & 0x0F],
             "conf1_fall": MUX_RES[raw["res1"] & 0x0F],
             "conf2_fall": MUX_RES[raw["res2"] & 0x0F],
         }
 
+        rise1 = _src_text(ser, block["conf1_rise"], F, cache, b, "rise")
+        rise2 = _src_text(ser, block["conf2_rise"], F, cache, b, "rise")
+        fall1 = _src_text(ser, block["conf1_fall"], F, cache, b, "fall")
+        fall2 = _src_text(ser, block["conf2_fall"], F, cache, b, "fall")
+
+        entry = {
+            "block": b,
+            "conf1": {"rise": rise1, "fall": fall1},
+            "conf2": {"rise": rise2, "fall": fall2},
+        }
+
+        if b in LOGIC_OUT_REG:
+            reg = LOGIC_OUT_REG[b]
+            val = _rd(ser, reg) & 0x03
+            entry["logic_out"] = {"reg": reg, "raw": val, "text": LOGIC_OUT_NAMES[b][val]}
+
+        res[b] = entry
+
         if show:
-            r = res[b]
             print(f"--- OUT block {b} ---")
-            for c in ("1", "2"):
-                rise = _src_text(ser, r[f"conf{c}_rise"], F, cache, b, "rise")
-                fall = _src_text(ser, r[f"conf{c}_fall"], F, cache, b, "fall")
-                print(f"  Config {c}: RISE = {rise:<28} FALL = {fall}")
+            print(f"  Config 1: RISE = {rise1:<28} FALL = {fall1}")
+            print(f"  Config 2: RISE = {rise2:<28} FALL = {fall2}")
+            if "logic_out" in entry:
+                lo = entry["logic_out"]
+                print(f"  Logic OUT: {lo['text']}")
+    return res
+
+
+
+def read_run_status(ser: serial.Serial) -> str:
+    """Reg 0x10 Command: 0=OFF, 1=ON, 2=FAULT"""
+    val = _rd(ser, 0x10)
+    return {0: "OFF", 1: "ON", 2: "FAULT"}.get(val, f"UNKNOWN({val})")
+
+
+class LiveMonitor:
+    """Passively listens for CLK IN (0x76) / SYNC IN (0x77) broadcasts.
+    Does NOT send anything -> never collides with other reads/writes."""
+
+    def __init__(self, ser: serial.Serial):
+        self.ser = ser
+        self._lock = threading.Lock()
+        self._buf = bytearray()
+        self._clk_hz = None
+        self._sync_hz = None
+        self._stop = threading.Event()
+        self._thread = None
+
+    def start(self):
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=1)
+
+    def get(self):
+        with self._lock:
+            return self._clk_hz, self._sync_hz
+
+    def _run(self):
+        while not self._stop.is_set():
+            try:
+                n = self.ser.in_waiting
+                if n:
+                    self._buf += self.ser.read(n)
+                    self._parse()
+                else:
+                    time.sleep(0.02)
+            except Exception:
+                time.sleep(0.05)
+
+    def _parse(self):
+        if len(self._buf) > 8000:
+            self._buf = self._buf[-4000:]
+
+        i = 0
+        buf = self._buf
+        while i < len(buf) - 9:
+            if buf[i] == 0xAA and (buf[i+1] & 0xF0) in (0xC0, 0xE0):
+                dlc = buf[i+1] & 0x0F
+                n = 2 + 4 + dlc + 1
+                if i + n <= len(buf) and buf[i+n-1] == 0x55:
+                    reg = buf[i+2]
+                    if dlc == 4:
+                        val = int.from_bytes(buf[i+6:i+6+4], "little")
+                        hz = (val / 100.0) * 1000.0
+                        with self._lock:
+                            if reg == 0x76:
+                                self._clk_hz = hz
+                            elif reg == 0x77:
+                                self._sync_hz = hz
+                    i += n
+                    continue
+            i += 1
+        self._buf = buf[i:]
+
+
+def dump_delay_regs(ser, ch: int):
+    r = DEL_REGS[ch]
+    cnt = _rd(ser, r["cnt"])
+    d = _rd(ser, r["d"]) if r["d"] else None
+    a = _rd(ser, r["a"]) if r["a"] else None
+    print(f"ch{ch}: DelayCnt(0x{r['cnt']:02X})={cnt}  Ddly={d}  Adly={a}")
+
+
+
+LOGIC_OUT_REG = {2: 0x7A, 3: 0x7B, 4: 0x7C, 5: 0x7D}
+
+LOGIC_OUT_NAMES = {
+    2: ["OUT2", "OUT2 and OUT1", "OUT2 or OUT1", "not OUT1"],
+    3: ["OUT3", "OUT3 and OUT2", "OUT3 or OUT2", "not OUT2"],
+    4: ["OUT4", "OUT4 and OUT3", "OUT4 or OUT3", "not OUT3"],
+    5: ["OUT5", "OUT5 and OUT4", "OUT5 or OUT4", "not OUT4"],
+}
+
+
+def read_logic_out(ser: serial.Serial, outs=(2, 3, 4, 5), show: bool = True) -> dict:
+    """Read OUT2..OUT5 logic mux (AND/OR/NOT with neighbor). Only these 4 have it."""
+    res = {}
+    for n in outs:
+        if n not in LOGIC_OUT_REG:
+            continue
+        reg = LOGIC_OUT_REG[n]
+        val = _rd(ser, reg) & 0x03
+        name = LOGIC_OUT_NAMES[n][val]
+        res[n] = dict(reg=reg, raw=val, text=name)
+
+        if show:
+            print(f"OUT{n} Logic (0x{reg:02X}) : {val} -> {name}")
     return res

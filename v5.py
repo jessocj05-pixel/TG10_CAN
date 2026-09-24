@@ -12,14 +12,13 @@ Wire protocol (serial -> CAN), extended frames:
 import serial
 import time
 from registers import describe_write
-from readtest import *
+# from readtest import *
 
 
 from user import get_int, get_float, ratediv, ndiv, freq, tperiod
 # from user_calculation import read_osc_clk
 
-from readv1 import read_status, read_config, read_live, snap, read_mux_delay
-
+from readv1 import read_status, read_config, read_live, read_mux_delay, read_run_status, LiveMonitor, fmt_freq, dump_delay_regs, read_logic_out
 
 PORT = "COM11"          # change to your adapter's port, e.g. "/dev/ttyUSB0" on Linux
 BAUDRATE = 2000000      # adapter's serial baud (check your adapter config, common default)
@@ -801,9 +800,38 @@ if __name__ == "__main__":
 
 
         read_mux_delay(ser)
+
+        # # --- live monitor demo ---
+        # mon = LiveMonitor(ser)
+        # mon.start()
+
+        # try:
+        #     for _ in range(50):              # ~5 seconds, change as needed
+        #         clk, sync = mon.get()
+        #         print(f"\rCLK={fmt_freq(clk):<18} SYNC={fmt_freq(sync):<18}", end="")
+        #         time.sleep(0.1)
+        # except KeyboardInterrupt:
+        #     pass
+        # finally:
+        #     mon.stop()
+
+        # print()   # newline after \r loop
+
+
+        # for ch in range(8):
+        #     dump_delay_regs(ser, ch)
         #run_sequence(ser, INTERNAL_100MHz_SEQUENCE)
         #run_sequence(ser,EXTERNALSINGLEIN_CLKIN_100MHz_SEQUENCE)
         #run_sequence(ser,EXTERNALSINGLEIN_SYNCIN_10MHZ_SEQUENCE)
+
+
+        # try:
+        #     while True:
+        #         read_live(ser)
+        #         time.sleep(0.1)
+        # except KeyboardInterrupt:
+        #     pass
+
         time.sleep(1.00)
         #run_sequence(ser,FREQ_10KHZ)
         #run_sequence(ser,EXTERNALDUALIN_CLKIN_100MHZ_SYNCIN_20MHZ_SEQUENCE)
