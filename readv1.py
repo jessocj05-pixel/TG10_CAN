@@ -1,7 +1,6 @@
 # sy4000_status.py
 import time
 import serial
-import threading
 
 MODE_NAMES = {
     "internal":  "Internal",
@@ -348,70 +347,6 @@ def read_run_status(ser: serial.Serial) -> str:
     val = _rd(ser, 0x10)
     return {0: "OFF", 1: "ON", 2: "FAULT"}.get(val, f"UNKNOWN({val})")
 
-
-class LiveMonitor:
-    """Passively listens for CLK IN (0x76) / SYNC IN (0x77) broadcasts.
-    Does NOT send anything -> never collides with other reads/writes."""
-
-    def __init__(self, ser: serial.Serial):
-        self.ser = ser
-        self._lock = threading.Lock()
-        self._buf = bytearray()
-        self._clk_hz = None
-        self._sync_hz = None
-        self._stop = threading.Event()
-        self._thread = None
-
-    def start(self):
-        self._stop.clear()
-        self._thread = threading.Thread(target=self._run, daemon=True)
-        self._thread.start()
-
-    def stop(self):
-        self._stop.set()
-        if self._thread:
-            self._thread.join(timeout=1)
-
-    def get(self):
-        with self._lock:
-            return self._clk_hz, self._sync_hz
-
-    def _run(self):
-        while not self._stop.is_set():
-            try:
-                n = self.ser.in_waiting
-                if n:
-                    self._buf += self.ser.read(n)
-                    self._parse()
-                else:
-                    time.sleep(0.02)
-            except Exception:
-                time.sleep(0.05)
-
-    def _parse(self):
-        if len(self._buf) > 8000:
-            self._buf = self._buf[-4000:]
-
-        i = 0
-        buf = self._buf
-        while i < len(buf) - 9:
-            if buf[i] == 0xAA and (buf[i+1] & 0xF0) in (0xC0, 0xE0):
-                dlc = buf[i+1] & 0x0F
-                n = 2 + 4 + dlc + 1
-                if i + n <= len(buf) and buf[i+n-1] == 0x55:
-                    reg = buf[i+2]
-                    if dlc == 4:
-                        val = int.from_bytes(buf[i+6:i+6+4], "little")
-                        hz = (val / 100.0) * 1000.0
-                        with self._lock:
-                            if reg == 0x76:
-                                self._clk_hz = hz
-                            elif reg == 0x77:
-                                self._sync_hz = hz
-                    i += n
-                    continue
-            i += 1
-        self._buf = buf[i:]
 
 
 def dump_delay_regs(ser, ch: int):
