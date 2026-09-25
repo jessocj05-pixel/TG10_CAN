@@ -32,7 +32,7 @@ def _parse_frames(raw: bytes):
     return out
 
 
-def _rd(ser, reg_id: int, wait=0.3) -> int:
+def _rd(ser, reg_id: int, wait=0.08) -> int:
     """Read any register, return little-endian int. Length-agnostic."""
     from v5 import read_register            # lazy import, avoids circular import
     ser.reset_input_buffer()                # drop stale bytes
@@ -232,6 +232,17 @@ MUX_SET = ["0", "1", "Post-count", "Fine del0", "Fine del1", "Fine del2",
            "Delayed res"]
 MUX_RES = MUX_SET[:12] + ["Latch RES", "GATE", "nGATE", "Delayed set"]
 
+
+LOGIC_OUT_REG = {2: 0x7A, 3: 0x7B, 4: 0x7C, 5: 0x7D}
+
+LOGIC_OUT_NAMES = {
+    2: ["OUT2", "OUT2 and OUT1", "OUT2 or OUT1", "not OUT1"],
+    3: ["OUT3", "OUT3 and OUT2", "OUT3 or OUT2", "not OUT2"],
+    4: ["OUT4", "OUT4 and OUT3", "OUT4 or OUT3", "not OUT3"],
+    5: ["OUT5", "OUT5 and OUT4", "OUT5 or OUT4", "not OUT4"],
+}
+
+
 # delay source -> counter regs (Delay counter, D delay, A delay, Post counter)
 # delay channel n: DelayCnt, Ddly, Adly, PostCnt
 DEL_REGS = {
@@ -288,12 +299,12 @@ def _src_text(ser, name, F, cache, block, kind):
         if ch not in cache:
             cache[ch] = _delay_seconds(ser, ch, F)
         return f"{name} ({fmt_delay(cache[ch], F)})"
-    for b in range(8):
-        print(f"block{b} PostCnt(0x{0x26+b:02X}) = {_rd(ser, 0x26+b)}")
+    # for b in range(8):
+    #     print(f"block{b} PostCnt(0x{0x26+b:02X}) = {_rd(ser, 0x26+b)}")
     return name
 
 
-def read_mux_delay(ser: serial.Serial, blocks=range(8), show: bool = True) -> dict:
+def read_mux_delay(ser: serial.Serial, blocks=range(8), show: bool = True, fast: bool = False) -> dict:
     F = _sys_clock_hz(ser)
     cache = {}
     res = {}
@@ -313,14 +324,21 @@ def read_mux_delay(ser: serial.Serial, blocks=range(8), show: bool = True) -> di
             "conf2_fall": MUX_RES[raw["res2"] & 0x0F],
         }
 
-        rise1 = _src_text(ser, block["conf1_rise"], F, cache, b, "rise")
-        rise2 = _src_text(ser, block["conf2_rise"], F, cache, b, "rise")
-        fall1 = _src_text(ser, block["conf1_fall"], F, cache, b, "fall")
-        fall2 = _src_text(ser, block["conf2_fall"], F, cache, b, "fall")
+        if fast:
+            rise1, rise2 = block["conf1_rise"], block["conf2_rise"]
+            fall1, fall2 = block["conf1_fall"], block["conf2_fall"]
+        else:
+            rise1 = _src_text(ser, block["conf1_rise"], F, cache, b, "rise")
+            rise2 = _src_text(ser, block["conf2_rise"], F, cache, b, "rise")
+            fall1 = _src_text(ser, block["conf1_fall"], F, cache, b, "fall")
+            fall2 = _src_text(ser, block["conf2_fall"], F, cache, b, "fall")
+        # rise1 = _src_text(ser, block["conf1_rise"], F, cache, b, "rise")
+        # rise2 = _src_text(ser, block["conf2_rise"], F, cache, b, "rise")
+        # fall1 = _src_text(ser, block["conf1_fall"], F, cache, b, "fall")
+        # fall2 = _src_text(ser, block["conf2_fall"], F, cache, b, "fall")
 
         entry = {
-            "block": b,
-            "conf1": {"rise": rise1, "fall": fall1},
+            "block": b,"conf1": {"rise": rise1, "fall": fall1},
             "conf2": {"rise": rise2, "fall": fall2},
         }
 
@@ -358,15 +376,6 @@ def dump_delay_regs(ser, ch: int):
 
 
 
-LOGIC_OUT_REG = {2: 0x7A, 3: 0x7B, 4: 0x7C, 5: 0x7D}
-
-LOGIC_OUT_NAMES = {
-    2: ["OUT2", "OUT2 and OUT1", "OUT2 or OUT1", "not OUT1"],
-    3: ["OUT3", "OUT3 and OUT2", "OUT3 or OUT2", "not OUT2"],
-    4: ["OUT4", "OUT4 and OUT3", "OUT4 or OUT3", "not OUT3"],
-    5: ["OUT5", "OUT5 and OUT4", "OUT5 or OUT4", "not OUT4"],
-}
-
 
 def read_logic_out(ser: serial.Serial, outs=(2, 3, 4, 5), show: bool = True) -> dict:
     """Read OUT2..OUT5 logic mux (AND/OR/NOT with neighbor). Only these 4 have it."""
@@ -382,3 +391,5 @@ def read_logic_out(ser: serial.Serial, outs=(2, 3, 4, 5), show: bool = True) -> 
         if show:
             print(f"OUT{n} Logic (0x{reg:02X}) : {val} -> {name}")
     return res
+
+

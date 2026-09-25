@@ -756,7 +756,13 @@ def run_check_out():
     time.sleep(1.00)
        
 
-
+def on_monitor_button_click():
+    status = read_status(ser, show=False)
+    config = read_config(ser, show=False)
+    live   = read_live(ser, show=False)
+    mux    = read_mux_delay(ser, show=False)
+    run    = read_run_status(ser)
+    return status, config, live, mux, run
 
 def run_sequence(ser, sequence):
     for reg_id, data in sequence:
@@ -780,16 +786,33 @@ if __name__ == "__main__":
     with serial.Serial(PORT, BAUDRATE, timeout=TIMEOUT) as ser:
         print(f"Opened {PORT} at {BAUDRATE} baud")
 
-         # quick test: only read, no writes
+        #  # quick test: only read, no writes
+        # try:
+        #     read_status(ser)
+        # except Exception as e:
+        #     print("Error:", e)
+        
+
         try:
-            read_status(ser)
-        except Exception as e:
-            print("Error:", e)
+            status, config, live, mux, run = on_monitor_button_click()
 
+            print("STATUS:", status)
+            print("CONFIG:", config)
+            print("LIVE  :", live)
+            print("RUN   :", run)
 
+            for b in sorted(mux):
+                entry = mux[b]
+                print(f"--- block {b} ---")
+                print("  conf1:", entry["conf1"])
+                print("  conf2:", entry["conf2"])
+                if "logic_out" in entry:
+                    print("  logic_out:", entry["logic_out"]["text"])
+        finally:
+            ser.close()
 
-        read_config(ser)
-        read_live(ser)
+        # read_config(ser)
+        # read_live(ser)
 
         # a = snap(ser)
         # for _ in range(5):
@@ -799,7 +822,8 @@ if __name__ == "__main__":
         # print(a); print(b)
 
 
-        read_mux_delay(ser)
+        # read_mux_delay(ser)
+        # read_mux_delay(ser, blocks=range(8), show=True, fast=False)
 
         # # --- live monitor demo ---
         # mon = LiveMonitor(ser)
