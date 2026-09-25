@@ -1160,7 +1160,15 @@ class TG10Window(QMainWindow):
         self.resize(1450, 820)
 
         self.running = False
+
+        # USB-CAN connection state. The COM port is selected dynamically
+        # from Windows; no COM number is hard-coded in the GUI.
         self.selected_com_port = None
+        self.serial_connection = None
+        self.can_backend = None
+        self.can_reader = None
+        self.connection_state = False
+
         self.sync_mode = "Internal"
         self.frequency_mode = "Frequency"
         self.current_frequency_hz = 1_000_000.0
@@ -1276,7 +1284,7 @@ class TG10Window(QMainWindow):
             Qt.AlignCenter
         )
 
-        self.connection.setFixedWidth(145)
+        self.connection.setFixedWidth(220)
 
         h.addWidget(self.connection)
 
@@ -1472,9 +1480,9 @@ class TG10Window(QMainWindow):
         grid.addWidget(freq, 1, 1)
         grid.addWidget(other, 2, 0, 1, 2)
 
-        grid.setColumnStretch(0, 31)
-        grid.setColumnStretch(1, 28)
-        grid.setColumnStretch(2, 41)
+        grid.setColumnStretch(0, 43)
+        grid.setColumnStretch(1, 17)
+        grid.setColumnStretch(2, 40)
 
         grid.setRowMinimumHeight(0, 390)
         grid.setRowMinimumHeight(1, 170)
@@ -1522,7 +1530,7 @@ class TG10Window(QMainWindow):
         sync_layout.addWidget(self.dashboard_live_sync)
         layout.addWidget(sync_tile, 1)
 
-        #self.dashboard_live_note = label("Internal timing reference", "SmallGrey")
+        self.dashboard_live_note = label("Internal timing reference", "SmallGrey")
         layout.addWidget(self.dashboard_live_note)
 
         self._update_other_live_parameter()
@@ -1559,20 +1567,37 @@ class TG10Window(QMainWindow):
             "One shot trigger",
         ]
 
+        # Keep ALL FOUR synchronization modes on ONE horizontal row.
+        # Fixed widths prevent Qt from wrapping the long labels into a
+        # second row when the Sync card is resized.
         mode_row = QHBoxLayout()
-        mode_row.setContentsMargins(2, 0, 2, 2)
-        mode_row.setSpacing(20)
+        mode_row.setContentsMargins(2, 0, 2, 4)
+        mode_row.setSpacing(8)
 
         mode_buttons = []
-        for idx, name in enumerate(mode_names):
+        mode_widths = [
+            92,   # Internal
+            165,  # External SINGLE IN
+            165,  # External DUAL IN
+            145,  # One shot trigger
+        ]
+
+        for idx, (name, width) in enumerate(zip(mode_names, mode_widths)):
             radio = QRadioButton(name)
             radio.setObjectName("SyncModeRadio")
             radio.setChecked(idx == 0)
             radio.setCursor(Qt.PointingHandCursor)
-            radio.setMinimumHeight(25)
+            radio.setFixedWidth(width)
+            radio.setMinimumHeight(30)
+            radio.setMaximumHeight(30)
+            radio.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
             mode_group.addButton(radio, idx)
             mode_buttons.append(radio)
-            mode_row.addWidget(radio, 1)
+            mode_row.addWidget(radio, 0)
+
+        # Consume any remaining horizontal space without moving the
+        # synchronization options onto another row.
+        mode_row.addStretch(1)
 
         self.internal_radio, self.single_radio, self.dual_radio, self.oneshot_radio = mode_buttons
         mode_group.idClicked.connect(self._sync_mode_selected)
@@ -1638,9 +1663,8 @@ class TG10Window(QMainWindow):
 
         il.addWidget(label("Clock", "FieldLabel"))
         il.addWidget(self.internal_freq)
-        #self.internal_reference = label("Timing reference", "SmallGrey")
-        #self.internal_reference.setAlignment(Qt.AlignCenter)
-        #il.addWidget(self.internal_reference)
+        # The internal panel intentionally shows only the fixed 100 MHz clock.
+        # Do not add a separate "Timing reference" line here.
         il.addStretch()
 
         # ------------------------------------------------------------
@@ -3862,8 +3886,94 @@ class TG10Window(QMainWindow):
         return w
 
     # ========================================================
-    # ACTIONS
+    # USB-CAN / BACKEND CONNECTION
     # ========================================================
+
+    def _close_can_connection(self):
+        """Close the current USB-CAN serial connection, if one exists."""
+        if self.serial_connection is not None:
+            try:
+                if self.serial_connection.is_open:
+                    self.serial_connection.close()
+            except Exception:
+                pass
+
+        self.serial_connection = None
+        self.connection_state = False
+        self.connection.setText("●  DISCONNECTED")
+
+    def _connect_can_backend(self):
+        """
+        Open the dynamically selected COM port and perform one READ-ONLY
+        TG10 register test. No GUI Set operation is sent to the hardware.
+
+        Existing project modules are used for the actual CAN framing and
+        register-read implementation; this method only supplies the COM
+        port selected by the GUI.
+        """
+        port = self.selected_com_port
+
+        if not port:
+            QMessageBox.warning(
+                self,
+                "USB-CAN",
+                "No COM port is selected."
+            )
+            return False
+
+        self._close_can_connection()
+
+        try:
+            # Lazy imports keep the GUI start-up independent of the hardware
+            # backend. These are the existing project backend modules.
+            import Sy4000_can_control_org as can_backend
+            import readv1 as can_reader
+
+            self.can_backend = can_backend
+            self.can_reader = can_reader
+
+            # Use the backend's existing serial settings. The COM number
+            # comes ONLY from the GUI selection.
+            self.serial_connection = can_backend.serial.Serial(
+                port,
+                baudrate=can_backend.BAUDRATE,
+                timeout=can_backend.TIMEOUT
+            )
+
+            # READ-ONLY hardware test: register 0x52 is already used by the
+            # existing TG10 backend for MuxConfSw / Config mode.
+            config_value = can_reader._rd(
+                self.serial_connection,
+                0x52,
+                wait=0.5
+            )
+
+            self.connection_state = True
+            self.connection.setText(
+                f"●  CONNECTED — {port}"
+            )
+            self.set_status(
+                f"Connected to TG10 on {port} | Read 0x52 = 0x{config_value:02X}"
+            )
+
+            return True
+
+        except Exception as exc:
+            self._close_can_connection()
+            self.can_backend = None
+            self.can_reader = None
+
+            self.set_status(
+                f"Connection failed on {port}"
+            )
+
+            QMessageBox.critical(
+                self,
+                "TG10 Connection Failed",
+                f"Could not connect to {port} or read TG10 register 0x52.\n\n"
+                f"Error: {exc}"
+            )
+            return False
 
     def open_com(self):
 
@@ -3879,6 +3989,12 @@ class TG10Window(QMainWindow):
 
         if dialog.exec() == QDialog.Accepted:
             self.selected_com_port = dialog.selected_port
+
+            if self.selected_com_port:
+                self._connect_can_backend()
+            else:
+                self._close_can_connection()
+                self.set_status("No COM port selected")
 
     def open_delay(self):
 
@@ -3938,10 +4054,21 @@ class TG10Window(QMainWindow):
 
     def set_status(self, text):
 
-        self.status.setText(
-            text +
-            "   |   Not connected"
-        )
+        if self.connection_state and self.selected_com_port:
+            self.status.setText(
+                text +
+                f"   |   Connected: {self.selected_com_port}"
+            )
+        else:
+            self.status.setText(
+                text +
+                "   |   Not connected"
+            )
+
+    def closeEvent(self, event):
+        """Close the serial port cleanly when the GUI exits."""
+        self._close_can_connection()
+        event.accept()
 
 
 # ============================================================
