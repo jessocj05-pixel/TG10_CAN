@@ -151,38 +151,39 @@ REG_MUX_PRET      = 79
 REG_MUX_DAC       = 80
 REG_MUXACQ        = 81
 
-_REG_NAMES = {
-    0x10: "Command",
-    0x02: "error",
-    0x11: "OscClock",
-    0x12: "Ndiv",
-    0x16: "DelayCnt1", 0x19: "DelayCnt2", 0x1A: "DelayCnt3",
-    0x1B: "DelayCnt4", 0x1C: "DelayCnt5", 0x1D: "DelayCnt6", 0x1E: "DelayCnt7",
-    0x20: "Ratediv",
-    0x26: "PostCnt0", 0x27: "PostCnt1", 0x28: "PostCnt2", 0x29: "PostCnt3",
-    0x2A: "PostCnt4", 0x2B: "PostCnt5", 0x2C: "PostCnt6", 0x2D: "PostCnt7",
-    0x2E: "MuxSetConf10", 0x2F: "MuxSetConf20", 0x30: "MuxResConf10", 0x31: "MuxResConf20",
-    0x32: "MuxSetConf11", 0x33: "MuxSetConf21", 0x34: "MuxResConf11", 0x35: "MuxResConf21",
-    0x36: "MuxSetConf12", 0x37: "MuxSetConf22", 0x38: "MuxResConf12", 0x39: "MuxResConf22",
-    0x3A: "MuxSetConf13", 0x3B: "MuxSetConf23", 0x3C: "MuxResConf13", 0x3D: "MuxResConf23",
-    0x3E: "MuxSetConf14", 0x3F: "MuxSetConf24", 0x40: "MuxResConf14", 0x41: "MuxResConf24",
-    0x42: "MuxSetConf15", 0x43: "MuxSetConf25", 0x44: "MuxResConf15", 0x45: "MuxResConf25",
-    0x46: "MuxSetConf16", 0x47: "MuxSetConf26", 0x48: "MuxResConf16", 0x49: "MuxResConf26",
-    0x4A: "MuxSetConf17", 0x4B: "MuxSetConf27", 0x4C: "MuxResConf17", 0x4D: "MuxResConf27",
-    0x4E: "MuxTrg1Out", 0x4F: "MuxPreT", 0x50: "MuxDAC",
-    0x52: "MuxConfSw", 0x53: "MuxBurstT", 0x54: "MuxStartTrg", 0x55: "MuxRateClk",
-    0x56: "Adly0", 0x57: "Adly1", 0x58: "Adly2", 0x59: "Adly3",
-    0x5A: "Adly4", 0x5B: "Adly5", 0x5C: "Adly6",
-    0x5D: "Ddly0", 0x5E: "Ddly1", 0x5F: "Ddly2", 0x60: "Ddly3",
-    0x62: "Ddly5", 0x63: "Ddly6",
-    0x69: "Fdiv", 0x6B: "DAC1", 0x6C: "DAC2", 0x6D: "VCO",
-    0x70: "OSTrig", 0x74: "BatchC", 0x75: "OscClkMux",
-    0x76: "OscInF", 0x77: "SYNCINF",
-    0x7A: "MuxOut2", 0x7B: "MuxOut3", 0x7C: "MuxOut4", 0x7D: "MuxOut5",
-    0x80: "DelayCnt0",
-}
+# _REG_NAMES = {
+#     0x10: "Command",
+#     0x02: "error",
+#     0x11: "OscClock",
+#     0x12: "Ndiv",
+#     0x16: "DelayCnt1", 0x19: "DelayCnt2", 0x1A: "DelayCnt3",
+#     0x1B: "DelayCnt4", 0x1C: "DelayCnt5", 0x1D: "DelayCnt6", 0x1E: "DelayCnt7",
+#     0x20: "Ratediv",
+#     0x26: "PostCnt0", 0x27: "PostCnt1", 0x28: "PostCnt2", 0x29: "PostCnt3",
+#     0x2A: "PostCnt4", 0x2B: "PostCnt5", 0x2C: "PostCnt6", 0x2D: "PostCnt7",
+#     0x2E: "MuxSetConf10", 0x2F: "MuxSetConf20", 0x30: "MuxResConf10", 0x31: "MuxResConf20",
+#     0x32: "MuxSetConf11", 0x33: "MuxSetConf21", 0x34: "MuxResConf11", 0x35: "MuxResConf21",
+#     0x36: "MuxSetConf12", 0x37: "MuxSetConf22", 0x38: "MuxResConf12", 0x39: "MuxResConf22",
+#     0x3A: "MuxSetConf13", 0x3B: "MuxSetConf23", 0x3C: "MuxResConf13", 0x3D: "MuxResConf23",
+#     0x3E: "MuxSetConf14", 0x3F: "MuxSetConf24", 0x40: "MuxResConf14", 0x41: "MuxResConf24",
+#     0x42: "MuxSetConf15", 0x43: "MuxSetConf25", 0x44: "MuxResConf15", 0x45: "MuxResConf25",
+#     0x46: "MuxSetConf16", 0x47: "MuxSetConf26", 0x48: "MuxResConf16", 0x49: "MuxResConf26",
+#     0x4A: "MuxSetConf17", 0x4B: "MuxSetConf27", 0x4C: "MuxResConf17", 0x4D: "MuxResConf27",
+#     0x4E: "MuxTrg1Out", 0x4F: "MuxPreT", 0x50: "MuxDAC",
+#     0x52: "MuxConfSw", 0x53: "MuxBurstT", 0x54: "MuxStartTrg", 0x55: "MuxRateClk",
+#     0x56: "Adly0", 0x57: "Adly1", 0x58: "Adly2", 0x59: "Adly3",
+#     0x5A: "Adly4", 0x5B: "Adly5", 0x5C: "Adly6",
+#     0x5D: "Ddly0", 0x5E: "Ddly1", 0x5F: "Ddly2", 0x60: "Ddly3",
+#     0x62: "Ddly5", 0x63: "Ddly6",
+#     0x69: "Fdiv", 0x6B: "DAC1", 0x6C: "DAC2", 0x6D: "VCO",
+#     0x70: "OSTrig", 0x74: "BatchC", 0x75: "OscClkMux",
+#     0x76: "OscInF", 0x77: "SYNCINF",
+#     0x7A: "MuxOut2", 0x7B: "MuxOut3", 0x7C: "MuxOut4", 0x7D: "MuxOut5",
+#     0x80: "DelayCnt0",
+# }
+_REG_NAMES = {reg_id: info[0] for reg_id, info in REGS.items()}
 
-DELAY_REGS = {
+_DELAY_MAP = {
     0: {"cnt": 128, "d": 93, "a": 86},
     1: {"cnt": 22,  "d": 94, "a": 87},
     2: {"cnt": 25,  "d": 95, "a": 88},
@@ -193,9 +194,9 @@ DELAY_REGS = {
     7: {"cnt": 30,  "d": None, "a": None},
 }
 
-POSTDEL_REGS = {i: 38 + i for i in range(8)}
+_POST_MAP = {i: 38 + i for i in range(8)}
 
-SR_BLOCK_REGS = {
+_SR_MAP = {
     0: {"set1": 46, "set2": 47, "res1": 48, "res2": 49},
     1: {"set1": 50, "set2": 51, "res1": 52, "res2": 53},
     2: {"set1": 54, "set2": 55, "res1": 56, "res2": 57},
@@ -205,7 +206,7 @@ SR_BLOCK_REGS = {
     6: {"set1": 70, "set2": 71, "res1": 72, "res2": 73},
     7: {"set1": 74, "set2": 75, "res1": 76, "res2": 77},
 }
-LOGIC_MUX_REGS = {
+_LOGIC_MUX = {
     2: REGISTERS["MuxOut2"],
     3: REGISTERS["MuxOut3"],
     4: REGISTERS["MuxOut4"],

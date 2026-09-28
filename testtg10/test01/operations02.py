@@ -34,7 +34,14 @@ from calculations02_ import (
 # ---------------------------------------------------------------------------
 SeqItem  = Tuple[int, Optional[bytes]]
 Sequence = List[SeqItem]
+from registers_ import validate_register_data
 
+def validate_sequence(seq: Sequence) -> Sequence:
+    """Run every write through validate_register_data before send path."""
+    for reg, data in seq:
+        if data is not None:
+            validate_register_data(reg, data)
+    return seq
 
 # ===========================================================================
 # Strict payload helpers – reject out-of-range values instead of wrapping
@@ -142,7 +149,7 @@ def seq_external_syncin(
         (0x6D, _u8(vco)),                           # VCO2 freq (0=2.5GHz, 1=3GHz)
         (0x20, _u32(ratediv)),                      # Ratediv = <user>
         (0x55, _u8(0x03)),                          # MuxRateClk = SYNCIN
-        (0x54, _u8(0x00)),                          # MuxStartTrg = Rate divider
+        (0x54, _u8(0x00)),                          # MuxStartTrg = SYNCIN@OPTCLK
     ]
     if command_on:
         seq.append((0x10, _u8(0x01)))               # Command = ON
@@ -344,40 +351,8 @@ def seq_set_ratediv(ratediv: int) -> Sequence:
 
 # Hardware map (from registers.DELAY_REGS)
 # CH : cnt_reg  d_reg  a_reg
-_DELAY_MAP = {
-    0: {"cnt": 0x80, "d": 0x5D, "a": 0x56},
-    1: {"cnt": 0x16, "d": 0x5E, "a": 0x57},
-    2: {"cnt": 0x19, "d": 0x5F, "a": 0x58},
-    3: {"cnt": 0x1A, "d": 0x60, "a": 0x59},
-    4: {"cnt": 0x1B, "d": None, "a": 0x5A},   # no D-delay
-    5: {"cnt": 0x1C, "d": 0x62, "a": 0x5B},
-    6: {"cnt": 0x1D, "d": 0x63, "a": 0x5C},
-    7: {"cnt": 0x1E, "d": None, "a": None},   # counter only
-}
-
-_POST_MAP = {
-    0: 0x26, 1: 0x27, 2: 0x28, 3: 0x29,
-    4: 0x2A, 5: 0x2B, 6: 0x2C, 7: 0x2D,
-}
-
-# SR block: set1, set2, res1, res2
-_SR_MAP = {
-    0: {"set1": 0x2E, "set2": 0x2F, "res1": 0x30, "res2": 0x31},
-    1: {"set1": 0x32, "set2": 0x33, "res1": 0x34, "res2": 0x35},
-    2: {"set1": 0x36, "set2": 0x37, "res1": 0x38, "res2": 0x39},
-    3: {"set1": 0x3A, "set2": 0x3B, "res1": 0x3C, "res2": 0x3D},
-    4: {"set1": 0x3E, "set2": 0x3F, "res1": 0x40, "res2": 0x41},
-    5: {"set1": 0x42, "set2": 0x43, "res1": 0x44, "res2": 0x45},
-    6: {"set1": 0x46, "set2": 0x47, "res1": 0x48, "res2": 0x49},
-    7: {"set1": 0x4A, "set2": 0x4B, "res1": 0x4C, "res2": 0x4D},
-}
-
-_LOGIC_MUX = {
-    2: 0x7A,   # MuxOut2
-    3: 0x7B,   # MuxOut3
-    4: 0x7C,   # MuxOut4
-    5: 0x7D,   # MuxOut5
-}
+from registers_ import (
+    _DELAY_MAP, _POST_MAP,_SR_MAP, _LOGIC_MUX)
 
 
 def seq_delay_channel(
@@ -506,8 +481,8 @@ def build_post_delay_channel(
     pulse_width_s: float,
     f_hz: float,
 ) -> Sequence:
-    pc = post_delay_calc(f_hz, pulse_width_s)
-    return seq_post_delay_channel(channel, pc)
+    pc, actual_width_s = post_delay_calc(channel, f_hz, pulse_width_s)   # arg order: channel first now; unpack the tuple
+    return seq_post_delay_channel(channel, pc)                          # pc is now the int, same as before -- rest unchanged
 
 
 # ===========================================================================
