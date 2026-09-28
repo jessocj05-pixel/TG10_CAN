@@ -191,8 +191,8 @@ def menu_sync():
     choice = ask("choose", default="1")
 
     if choice == "1":
-        mode = ask("Enter as (1) Period or (2) Frequency", default="1")
-        if mode == "2":
+        mode = ask("Enter as (1) Frequency or (2) Period", default="1")
+        if mode == "1":
             f = parse_freq(ask("Frequency (e.g. 1kHz)", default="1kHz"))
             period_s = 1.0 / f
         else:
@@ -243,8 +243,8 @@ def menu_sync():
         syncin_hz = parse_freq(
         ask("SYNC IN frequency (e.g. 10MHz)")
         )
-        mode = ask("Enter as (1) Period or (2) Frequency", default="1")
-        if mode == "2":
+        mode = ask("Enter as (1) Frequency or (2) Period", default="1")
+        if mode == "1":
             f = parse_freq(ask("Desired output frequency"))
             period_s = 1.0 / f
         else:
@@ -261,11 +261,19 @@ def menu_sync():
 
     elif choice == "5":
         seq = seq_oneshot_software()
+        state["trig_mode"] = "oneshot"
+        state["f_hz"] = 3_000_000_000
+        state["ext_clk_hz"] = None
+        state["syncin_hz"] = None
         update_current_config(seq)
         print_sequence(seq, "one-shot FIRE (software)")
 
     elif choice == "6":
         seq = seq_oneshot_smart()
+        state["trig_mode"] = "oneshot"
+        state["f_hz"] = 3_000_000_000
+        state["ext_clk_hz"] = None
+        state["syncin_hz"] = None
         update_current_config(seq)
         print_sequence(seq, "one-shot FIRE (smart)")
 
@@ -299,7 +307,17 @@ def menu_freq():
             period_s,
             state["ext_clk_hz"]
         )
-
+    elif state["trig_mode"] == "syncin":
+        if state.get("syncin_hz"):
+            ratediv = rate_divider_from_period_ext(period_s, state["syncin_hz"])
+        else:
+            use = ask("SYNCIN freq known? (1) enter Hz  (2) RateDiv raw", default="2")
+            if use == "1":
+                sync_hz = parse_freq(ask("SYNC IN frequency (e.g. 10MHz)"))
+                state["syncin_hz"] = sync_hz
+                ratediv = rate_divider_from_period_ext(period_s, sync_hz)
+            else:
+                ratediv = int(ask("RateDiv"))
     elif state["trig_mode"] == "dual" and state["syncin_hz"]:
         ratediv = rate_divider_from_period_ext(
             period_s,
@@ -423,7 +441,6 @@ def menu_delay():
     print()
     print("1) Delay channels (del0–del7)")
     print("2) Post-delay channels (postdel0–postdel7)")
-    print("3) Load PRESET1")
     choice = ask("choose", default="1")
 
     if choice == "1":
@@ -507,10 +524,15 @@ def _ask_sr_source(prompt: str, default: int) -> int:
         if 0 <= val <= 15:
             return val
         raise ValueError(f"source code must be 0-15, got {val}")
-    matches = [(code, name) for name, code in SR_SOURCE_MAP if raw in name.lower()]
+    exact = [(code, name) for name, code in SR_SOURCE_MAP.items() if name.lower() == raw]
+    if exact:
+        return exact[0][0]
+    matches = [(code, name) for name, code in SR_SOURCE_MAP.items() if raw in name.lower()]
     if not matches:
         raise ValueError(f"unknown source {raw!r} – use 0-15 or a name from the list")
-    matches.sort(key=lambda x: len(x[1]), reverse=True)
+    if len(matches) > 1:
+        names = ", ".join(n for _, n in matches)
+        raise ValueError(f"ambiguous source {raw!r} matches: {names} – use a more specific name or a code")
     return matches[0][0]
 
 from registers_ import OUTPUTS
@@ -549,11 +571,11 @@ def menu_output():
         seq = seq_sr_block(ch, set1=s1, set2=s2, res1=r1, res2=r2)
 
         if logic is not None:
-            extra = seq_out_config_del(
-                ch, set_src=s2, res_src=r2, logic_mux=logic, command_on=False
-            )
-            logic_writes = [item for item in extra if item[0] in (0x7A, 0x7B, 0x7C, 0x7D)]
-            seq = list(seq) + logic_writes
+            from registers_ import _LOGIC_MUX
+            from operations02 import _u8
+            if ch not in _LOGIC_MUX:
+                raise ValueError(f"OUT{ch} has no logic mux")
+            seq = list(seq) + [(_LOGIC_MUX[ch], _u8(logic))]
 
         name_s2 = next(
             (name for name, code in SR_SOURCE_MAP.items() if code == s2),
@@ -595,11 +617,68 @@ def menu_output():
 # 6. Monitor
 # ===========================================================================
 
+# def menu_monitor():
+#     print("\n--- Monitor ---")
+#     print("(Offline mode – no CAN connected)")
+
+#     print("\nSystem:")
+#     print(f"  Trigger mode : {state['trig_mode'] or '--'}")
+
+#     if state["f_hz"]:
+#         print(f"  System clock : {state['f_hz'] / 1e9:.3f} GHz")
+#     else:
+#         print("  System clock : --")
+
+#     if state["ext_clk_hz"]:
+#         print(f"  CLK IN       : {state['ext_clk_hz'] / 1e6:.3f} MHz")
+#     else:
+#         print("  CLK IN       : --")
+
+#     if state.get("syncin_hz"):
+#         print(f"  SYNC IN      : {state['syncin_hz'] / 1e6:.3f} MHz")
+#     else:
+#         print("  SYNC IN      : --")
+
+#     print(f"  Config mode  : {state['config_mode']}")
+#     print(f"  Armed        : {'YES' if state['armed'] else 'NO'}")
+
+#     print("\nConfiguration:")
+#     print(f"  Registers    : {len(state['current_config'])}")
+#     print(f"  Delay chans  : {len(state['delay'])}")
+#     print(f"  Post-delay   : {len(state['postdelay'])}")
+#     print(f"  Last op      : {len(state['last_seq'])} writes")
+#---------------------------------------------------------------------
 def menu_monitor():
     print("\n--- Monitor ---")
-    print("(Offline mode – no CAN connected)")
 
-    print("\nSystem:")
+    # Try to use live hardware reading if a serial port is available
+    ser = getattr(menu_monitor, "ser", None)   # we will inject it from main.py
+
+    if ser is not None and ser.is_open:
+        print("(LIVE mode – reading from hardware)\n")
+        try:
+            from monitor import (
+                read_status,
+                read_config,
+                read_live,
+                read_run_status,
+            )
+            print(f"Run status : {read_run_status(ser)}")
+            read_status(ser, show=True)
+            read_config(ser, show=True)
+            read_live(ser, show=True)
+        except Exception as e:
+            print(f"!! Live read failed: {e}")
+            print("Falling back to offline state...\n")
+            _show_offline_state()
+    else:
+        print("(Offline mode – no CAN connected)\n")
+        _show_offline_state()
+
+
+def _show_offline_state():
+    """Original offline display (kept for when no serial port is present)."""
+    print("System:")
     print(f"  Trigger mode : {state['trig_mode'] or '--'}")
 
     if state["f_hz"]:
@@ -625,7 +704,6 @@ def menu_monitor():
     print(f"  Delay chans  : {len(state['delay'])}")
     print(f"  Post-delay   : {len(state['postdelay'])}")
     print(f"  Last op      : {len(state['last_seq'])} writes")
-
 
 # ===========================================================================
 # 7. Save preset  (v3-style with comments)
