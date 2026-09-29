@@ -4,7 +4,7 @@ operations.py – Register-sequence builders for EKSMA SY4000 / TG10.
 
 Architecture
 ------------
-    menu.py  →  operations.py  →  calculation.py + registers.py  →  v3.py (CAN)
+    menu.py  →  operations.py  →  calculation.py + registers.py  →  main.py (CAN)
 
 Two levels of API
 -----------------

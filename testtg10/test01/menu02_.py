@@ -4,7 +4,7 @@ menu.py – Interactive UI for EKSMA SY4000 / TG10.
 
 Architecture
 ------------
-    menu.py  →  operations.py  →  calculation.py + registers.py  →  (later) v3.py / CAN
+    menu.py  →  operations.py  →  calculation.py + registers.py  →  main.py / CAN
 
 This file only:
   - asks the user questions
@@ -208,8 +208,8 @@ def menu_sync():
 
     elif choice == "2":
         fext = parse_freq(ask("External clock frequency (e.g. 50MHz)", default="100MHz"))
-        mode = ask("Enter as (1) Period or (2) Frequency", default="1")
-        if mode == "2":
+        mode = ask("Enter as (1) Frequency or (2) Period", default="1")
+        if mode == "1":
             f = parse_freq(ask("Desired output frequency (e.g. 1kHz)"))
             period_s = 1.0 / f
         else:
@@ -227,16 +227,35 @@ def menu_sync():
         print_sequence(seq, "external CLKIN")
 
     elif choice == "3":
-        rd_str = ask("RateDiv now? (Enter = default 2, set later in Freq)", default="")
-        ratediv = int(rd_str) if rd_str else 2
+        # Ask for frequencies instead of RateDiv
+        sync_str = ask("SYNC IN frequency (e.g. 10MHz, Enter = unknown)", default="")
+        if sync_str:
+            sync_hz = parse_freq(sync_str)
+            state["syncin_hz"] = sync_hz
+        else:
+            sync_hz = None
+            state["syncin_hz"] = None
+
+        f_str = ask("Desired output frequency (e.g. 1MHz, Enter = keep RateDiv=2)", default="")
+        if f_str and sync_hz:
+            f_hz = parse_freq(f_str)
+            period_s = 1.0 / f_hz
+            ratediv = rate_divider_from_period_ext(period_s, sync_hz)
+            state["f_hz"] = f_hz
+        else:
+            # fallback: keep the old simple default
+            ratediv = 2
+            state["f_hz"] = 3_000_000_000          # same as before
+
         seq = seq_external_syncin(ratediv=ratediv, command_on=False)
         state["trig_mode"] = "syncin"
-        state["f_hz"] = 3_000_000_000
         state["ext_clk_hz"] = None
-        state["syncin_hz"] = None
         update_current_config(seq)
         print_sequence(seq, "external SYNCIN")
-        print("(RateDiv can still be changed later via menu 2 Freq/Period)")
+        if state["syncin_hz"]:
+            print(f"(SYNCIN = {state['syncin_hz']/1e6:.3f} MHz → RateDiv = {ratediv})")
+        else:
+            print("(RateDiv can still be changed later via menu 2 Freq/Period)")
 
     elif choice == "4":
         fext = parse_freq(ask("External CLKIN frequency (e.g. 100MHz)", default="100MHz"))
@@ -293,8 +312,8 @@ def menu_freq():
     print(f"Current mode : {state['trig_mode']}")
     print(f"System clock : {state['f_hz']} Hz" if state["f_hz"] else "")
 
-    mode = ask("Enter as (1) Period or (2) Frequency", default="1")
-    if mode == "2":
+    mode = ask("Enter as (1) Frequency or (2) Period", default="1")
+    if mode == "1":
         f = parse_freq(ask("Frequency (e.g. 10kHz)"))
         period_s = 1.0 / f
     else:
