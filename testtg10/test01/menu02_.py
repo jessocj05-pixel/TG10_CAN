@@ -667,6 +667,9 @@ def menu_output():
 #     print(f"  Post-delay   : {len(state['postdelay'])}")
 #     print(f"  Last op      : {len(state['last_seq'])} writes")
 #---------------------------------------------------------------------
+from monitor02 import *
+
+
 def menu_monitor():
     print("\n--- Monitor ---")
 
@@ -676,23 +679,28 @@ def menu_monitor():
     if ser is not None and ser.is_open:
         print("(LIVE mode – reading from hardware)\n")
         try:
-            from monitor import (
-                read_status,
-                read_config,
-                read_live,
-                read_run_status,
-            )
-            print(f"Run status : {read_run_status(ser)}")
-            read_status(ser, show=True)
-            read_config(ser, show=True)
-            read_live(ser, show=True)
+        
+            status = read_status(ser, show=True),
+            config = read_config(ser, show=True),
+            live   = read_live(ser, show=True),
+            mux    = read_mux_delay(ser, show=True),
+            run    = read_run_status(ser),
+            return status, config, live, mux, run
+        
+            # print(f"Run status : {read_run_status(ser)}")
+            # read_status(ser, show=True)
+            # read_config(ser, show=True)
+            # read_live(ser, show=True)
         except Exception as e:
             print(f"!! Live read failed: {e}")
             print("Falling back to offline state...\n")
             _show_offline_state()
+            
     else:
         print("(Offline mode – no CAN connected)\n")
         _show_offline_state()
+
+
 
 
 def _show_offline_state():

@@ -197,7 +197,7 @@ def seq_oneshot_software(
     """
     seq: Sequence = [
         (0x10, _u8(0x00)),                          # Command = OFF
-        (0x75, _u8(0x01)),                          # OscClkMux = External
+        (0x75, _u8(0x00)),                          # OscClkMux = External
         (0x11, _u8(osc_clock)),                     # OscClock = <user>
         (0x12, _u32(ndiv)),                         # Ndiv = <user>
         (0x6D, _u8(vco)),                           # VCO2 freq (0=2.5GHz, 1=3GHz)

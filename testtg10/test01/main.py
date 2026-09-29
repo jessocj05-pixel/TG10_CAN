@@ -117,7 +117,6 @@ def _print_and_send(seq, label: str = "sequence"):
 # Install the hook
 menu_mod.print_sequence = _print_and_send
 
-
 # ────────────────────────────────────────────────
 # Entry point
 # ────────────────────────────────────────────────
