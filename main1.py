@@ -29,6 +29,20 @@ TG10_CAN_DIR = os.path.abspath(
 if TG10_CAN_DIR not in sys.path:
     sys.path.insert(0, TG10_CAN_DIR)
 
+# ============================================================
+# TG10 TEST01 MONITOR BACKEND PATH
+# ============================================================
+# monitor02.py uses the register transport from test01/main.py.
+# Keep this path separate from the main GUI file (main1.py).
+TEST01_DIR = os.path.join(
+    TG10_CAN_DIR,
+    "testtg10",
+    "test01"
+)
+
+if TEST01_DIR not in sys.path:
+    sys.path.insert(0, TEST01_DIR)
+
 from PySide6.QtCore import Qt, QPointF, QRectF, QTimer
 from PySide6.QtGui import (
     QFont, QPainter, QPen, QColor, QPolygonF, QBrush, QPixmap
@@ -1185,6 +1199,7 @@ class TG10Window(QMainWindow):
         self.serial_connection = None
         self.can_backend = None
         self.can_reader = None
+        self.monitor_backend = None
         self.connection_state = False
 
         self.sync_mode = "Internal"
@@ -1336,6 +1351,7 @@ class TG10Window(QMainWindow):
         self.run_button.setFixedWidth(115)
         self.run_button.clicked.connect(
             self.toggle_run
+            
         )
 
         h.addWidget(self.run_button)
@@ -2858,28 +2874,12 @@ class TG10Window(QMainWindow):
 
         header.addStretch()
 
-        header.addWidget(
-            label(
-                "Update:",
-                "FieldLabel"
-            )
-        )
-
-        update_rate = combo(
-            ["100 ms", "250 ms", "500 ms", "1 s"],
-            92
-        )
-        update_rate.setMinimumWidth(92)
-        update_rate.setObjectName("MonitorUpdateCombo")
-        update_rate.setToolTip("Monitor refresh interval")
-        header.addWidget(update_rate)
-
         refresh = QToolButton()
         refresh.setObjectName("Chevron")
         refresh.setText("↻")
         refresh.setFixedSize(22, 22)
         refresh.clicked.connect(
-            self._update_monitor_values
+            self._refresh_monitor_hardware
         )
         header.addWidget(refresh)
 
@@ -3075,10 +3075,348 @@ class TG10Window(QMainWindow):
 
         return frame
 
+    @staticmethod
+    def _monitor_frequency_text(monitor, value):
+        """Use the existing TG10 monitor backend formatter."""
+        try:
+            return monitor.fmt_freq(value)
+        except Exception:
+            if value is None:
+                return "--"
+            value = float(value)
+            if value >= 1e6:
+                return f"{value / 1e6:.6f} MHz"
+            if value >= 1e3:
+                return f"{value / 1e3:.3f} kHz"
+            return f"{value:.3f} Hz"
+
+    @staticmethod
+    def _monitor_period_text(monitor, value):
+        """Use the existing TG10 monitor backend formatter."""
+        try:
+            # The backend uses "us"; the GUI uses the TG10-style micro symbol.
+            result = monitor.fmt_period(value)
+            return result.replace(" us", " µs")
+        except Exception:
+            if value is None:
+                return "--"
+            value = float(value)
+            if value < 1e-6:
+                return f"{value * 1e9:.3f} ns"
+            if value < 1e-3:
+                return f"{value * 1e6:.3f} µs"
+            if value < 1:
+                return f"{value * 1e3:.3f} ms"
+            return f"{value:.6f} s"
+
+    @staticmethod
+    def _monitor_mode_text(mode):
+        names = {
+            "internal": "Internal",
+            "ext_clk": "External SINGLE IN",
+            "ext_sync": "External SINGLE IN",
+            "ext_dual": "External DUAL IN",
+            "oneshot": "One shot trigger",
+            "smart": "Smart trigger",
+        }
+        return names.get(mode, str(mode) if mode is not None else "--")
+
+    def _update_monitor_output_table(self, output_data):
+        """
+        Update the existing eight-row Monitor table from TG10 hardware.
+
+        Columns:
+            0 = Output
+            1 = Config1 Rise delay
+            2 = Config1 Fall delay
+            3 = Config2 Rise delay
+            4 = Config2 Fall delay
+            5 = Logic out
+        """
+        if not hasattr(self, "monitor_table_widget"):
+            return
+
+        table = self.monitor_table_widget
+
+        for block in range(8):
+            row = block
+            data = output_data.get(block, {}) if isinstance(output_data, dict) else {}
+
+            values = [
+                f"OUT{block}",
+                data.get("conf1", {}).get("rise", "NC"),
+                data.get("conf1", {}).get("fall", "NC"),
+                data.get("conf2", {}).get("rise", "NC"),
+                data.get("conf2", {}).get("fall", "NC"),
+            ]
+
+            logic = data.get("logic_out")
+            values.append(
+                logic.get("text", "-") if isinstance(logic, dict) else "-"
+            )
+
+            for column, value in enumerate(values):
+                item = table.item(row, column)
+
+                if item is None:
+                    item = QTableWidgetItem()
+
+                    item.setTextAlignment(
+                        Qt.AlignCenter
+                    )
+
+                    table.setItem(
+                        row,
+                        column,
+                        item
+                    )
+
+                item.setText(str(value))
+
+    def _refresh_monitor_hardware(self):
+        """
+        Read the complete TG10 Monitor from hardware.
+
+        This function is Monitor-only. It does not write to the TG10
+        and does not modify Sync, Config 1/2, Frequency/Period controls,
+        Output controls, or Other.
+        """
+        if (
+            not self.connection_state
+            or self.serial_connection is None
+        ):
+            self.set_status(
+                "Not connected — connect to TG10 first"
+            )
+            return
+
+        if self.monitor_backend is None:
+            self.set_status(
+                "Monitor backend not loaded"
+            )
+            return
+
+        try:
+            monitor = self.monitor_backend
+            ser = self.serial_connection
+
+            self.set_status(
+                "Refreshing TG10 Monitor..."
+            )
+
+            QApplication.processEvents()
+
+            # ====================================================
+            # 1. STATUS / SYNC / OUTPUT FREQUENCY / PERIOD
+            # ====================================================
+
+            status = monitor.read_status(
+                ser,
+                show=False
+            )
+
+            mode = status.get("mode")
+
+            self.monitor_sync_value.setText(
+                self._monitor_mode_text(mode)
+            )
+
+            out_hz = status.get("out_hz")
+            out_period_s = status.get("out_period_s")
+
+            if (
+                out_hz is not None
+                and out_hz > 0
+            ):
+                self.monitor_freq_value.setText(
+                    self._monitor_frequency_text(
+                        monitor,
+                        out_hz
+                    )
+                )
+
+                if out_period_s is None:
+                    out_period_s = 1.0 / out_hz
+
+                self.monitor_period_value.setText(
+                    self._monitor_period_text(
+                        monitor,
+                        out_period_s
+                    )
+                )
+            else:
+                self.monitor_freq_value.setText("--")
+                self.monitor_period_value.setText("--")
+
+            # ====================================================
+            # 2. DEVICE RUN STATUS
+            # ====================================================
+
+            try:
+                run_status = monitor.read_run_status(
+                    ser
+                )
+
+                self.monitor_device_value.setText(
+                    str(run_status)
+                )
+
+            except Exception as exc:
+                print(
+                    f"[MONITOR] Run status read failed: {exc}"
+                )
+                self.monitor_device_value.setText(
+                    "UNKNOWN"
+                )
+
+            # ====================================================
+            # 3. LIVE CLK IN / SYNC IN
+            # ====================================================
+
+            try:
+                live = monitor.read_live(
+                    ser,
+                    show=False
+                )
+
+                clk_hz = live.get("clk_in_hz")
+                sync_hz = live.get("sync_in_hz")
+
+                if clk_hz is not None:
+                    self.monitor_live_clk.setText(
+                        self._monitor_frequency_text(
+                            monitor,
+                            clk_hz
+                        )
+                    )
+                else:
+                    self.monitor_live_clk.setText("--")
+
+                if (
+                    sync_hz is not None
+                    and sync_hz > 0
+                ):
+                    self.monitor_live_sync.setText(
+                        self._monitor_frequency_text(
+                            monitor,
+                            sync_hz
+                        )
+                    )
+                else:
+                    self.monitor_live_sync.setText("--")
+
+            except Exception as exc:
+                print(
+                    f"[MONITOR] Live parameter read failed: {exc}"
+                )
+
+                self.monitor_live_clk.setText("--")
+                self.monitor_live_sync.setText("--")
+
+            # ====================================================
+            # 4. CONFIGURATION
+            # ====================================================
+
+            try:
+                config = monitor.read_config(
+                    ser,
+                    show=False
+                )
+
+                config_text = config.get(
+                    "text",
+                    config.get(
+                        "mode",
+                        "--"
+                    )
+                )
+
+                self.monitor_config_value.setText(
+                    str(config_text)
+                )
+
+            except Exception as exc:
+                print(
+                    f"[MONITOR] Config read failed: {exc}"
+                )
+
+                self.monitor_config_value.setText(
+                    "--"
+                )
+
+            # ====================================================
+            # 5. OUTPUT TABLE
+            #
+            # read_mux_delay() is the existing backend function
+            # that reads OUT0 ... OUT7 Config1/Config2 delay
+            # sources and logic output information.
+            # ====================================================
+
+            try:
+                output_data = monitor.read_mux_delay(
+                    ser,
+                    blocks=range(8),
+                    show=False,
+                    fast=False
+                )
+
+                self._update_monitor_output_table(
+                    output_data
+                )
+
+            except Exception as exc:
+                print(
+                    f"[MONITOR] Output table read failed: {exc}"
+                )
+
+                # Do not destroy the existing table contents if
+                # only the table read failed.
+                self.set_status(
+                    f"Monitor updated, output table read failed: {exc}"
+                )
+                return
+
+            self.set_status(
+                "Monitor refreshed from TG10 hardware"
+            )
+
+        except Exception as exc:
+            self.monitor_sync_value.setText(
+                "READ ERROR"
+            )
+            self.monitor_config_value.setText(
+                "--"
+            )
+            self.monitor_freq_value.setText(
+                "--"
+            )
+            self.monitor_period_value.setText(
+                "--"
+            )
+            self.monitor_device_value.setText(
+                "UNKNOWN"
+            )
+
+            if hasattr(self, "monitor_live_clk"):
+                self.monitor_live_clk.setText("--")
+
+            if hasattr(self, "monitor_live_sync"):
+                self.monitor_live_sync.setText("--")
+
+            print(
+                f"[MONITOR] Hardware read failed: {exc}"
+            )
+
+            self.set_status(
+                f"Monitor refresh failed: {exc}"
+            )
+
     def _update_monitor_values(self):
         """
-        Update only the values displayed by the Monitor section.
-        Other dashboard sections are not modified here.
+        Keep the existing Monitor update entry point.
+
+        When connected, perform a real hardware read.
+        When disconnected, show the neutral Monitor state.
         """
         if not hasattr(
             self,
@@ -3086,75 +3424,32 @@ class TG10Window(QMainWindow):
         ):
             return
 
-        # 1st layer
-        self.monitor_sync_value.setText(
-            self.committed_sync_mode
-        )
-
-        # 2nd layer
-        if hasattr(self, "committed_frequency_hz"):
-            freq_factor = {"Hz": 1.0, "kHz": 1e3, "MHz": 1e6}
-            freq_display = (
-                self.committed_frequency_hz /
-                freq_factor[self.committed_freq_unit]
-            )
-            self.monitor_freq_value.setText(
-                f"{freq_display:.8f} {self.committed_freq_unit}"
-            )
-
-        if hasattr(self, "committed_period_s"):
-            period_factor = {"s": 1.0, "ms": 1e-3, "µs": 1e-6, "ns": 1e-9}
-            period_display = (
-                self.committed_period_s /
-                period_factor[self.committed_period_unit]
-            )
-            self.monitor_period_value.setText(
-                f"{period_display:.8f} {self.committed_period_unit}"
-            )
-
-        # Config monitor
-        if hasattr(
-            self,
-            "config_settings"
+        if (
+            not self.connection_state
+            or self.serial_connection is None
+            or self.monitor_backend is None
         ):
-            cfg_name = self.committed_config_name
-            cfg = self.config_settings[cfg_name]
+            self.monitor_sync_value.setText("--")
+            self.monitor_config_value.setText("--")
+            self.monitor_freq_value.setText("--")
+            self.monitor_period_value.setText("--")
+            self.monitor_device_value.setText("OFF")
 
-            extra = ""
+            if hasattr(
+                self,
+                "monitor_live_clk"
+            ):
+                self.monitor_live_clk.setText("--")
 
-            if cfg["mode"] == "Burst":
-                burst_count_text = (
-                    "∞"
-                    if cfg.get("burst_infinite", False)
-                    else str(cfg.get("burst_count", 1))
-                )
-                extra = (
-                    f" / {cfg['burst_source']}"
-                    f" / {burst_count_text}"
-                )
+            if hasattr(
+                self,
+                "monitor_live_sync"
+            ):
+                self.monitor_live_sync.setText("--")
 
-            elif cfg["mode"] == "Gate":
-                extra = (
-                    f" / {cfg['gate']}"
-                )
+            return
 
-            elif cfg["mode"] == "Frequency divider":
-                extra = (
-                    f" / ÷{cfg['divider']}"
-                )
-
-            self.monitor_config_value.setText(
-                f"{cfg_name[-1]} "
-                f"({cfg['mode']})"
-                f"{extra}"
-            )
-
-        # 3rd layer
-        self.monitor_device_value.setText(
-            "RUN"
-            if self.running
-            else "OFF"
-        )
+        self._refresh_monitor_hardware()
 
     def monitor_table(self):
         """
@@ -3231,71 +3526,18 @@ class TG10Window(QMainWindow):
             QHeaderView.Stretch
         )
 
+        # Initial values shown before the first hardware refresh.
+        # They are deliberately neutral; Refresh replaces them with
+        # actual TG10 register readback.
         lcd_rows = [
-            [
-                "OUT0",
-                "25.64 ps",
-                "65.36 ns",
-                "25.64 ps",
-                "25.64 ps",
-                "-",
-            ],
-            [
-                "OUT1",
-                "NC",
-                "reset",
-                "25.64 ps",
-                "25.64 ps",
-                "-",
-            ],
-            [
-                "OUT2",
-                "25.64 ps",
-                "196.00 ns",
-                "25.64 ps",
-                "*196.00 ns",
-                "OUT2",
-            ],
-            [
-                "OUT3",
-                "25.64 ps",
-                "298.67 ns",
-                "25.64 ps",
-                "*298.67 ns",
-                "OUT3",
-            ],
-            [
-                "OUT4",
-                "25.64 ps",
-                "400.00 ns",
-                "109.89 ps",
-                "*400.00 ns",
-                "And OUT3",
-            ],
-            [
-                "OUT5",
-                "NC",
-                "NC",
-                "NC",
-                "NC",
-                "OUT5",
-            ],
-            [
-                "OUT6",
-                "set",
-                "NC",
-                "25.64 ps",
-                "reset",
-                "-",
-            ],
-            [
-                "OUT7",
-                "NC",
-                "NC",
-                "25.64 ps",
-                "*0.70 us",
-                "-",
-            ],
+            ["OUT0", "--", "--", "--", "--", "-"],
+            ["OUT1", "--", "--", "--", "--", "-"],
+            ["OUT2", "--", "--", "--", "--", "-"],
+            ["OUT3", "--", "--", "--", "--", "-"],
+            ["OUT4", "--", "--", "--", "--", "-"],
+            ["OUT5", "--", "--", "--", "--", "-"],
+            ["OUT6", "--", "--", "--", "--", "-"],
+            ["OUT7", "--", "--", "--", "--", "-"],
         ]
 
         for row_index, row_data in enumerate(
@@ -3538,6 +3780,7 @@ class TG10Window(QMainWindow):
 
         self.serial_connection = None
         self.connection_state = False
+        self.monitor_backend = None
         self.connection.setText("●  DISCONNECTED")
 
     def _connect_can_backend(self):
@@ -3566,9 +3809,11 @@ class TG10Window(QMainWindow):
             # backend. These are the existing project backend modules.
             import Sy4000_can_control_org as can_backend
             import readv1 as can_reader
+            import monitor02 as monitor_backend
 
             self.can_backend = can_backend
             self.can_reader = can_reader
+            self.monitor_backend = monitor_backend
 
             # Use the backend's existing serial settings. The COM number
             # comes ONLY from the GUI selection.
@@ -3578,9 +3823,10 @@ class TG10Window(QMainWindow):
                 timeout=can_backend.TIMEOUT
             )
 
-            # READ-ONLY hardware test: register 0x52 is already used by the
-            # existing TG10 backend for MuxConfSw / Config mode.
-            config_value = can_reader._rd(
+            # READ-ONLY hardware test using the SAME transport used by
+            # monitor02.py. This avoids mixing the old readv1 transport
+            # with the test01 Monitor backend.
+            config_value = monitor_backend._rd(
                 self.serial_connection,
                 0x52,
                 wait=0.5
@@ -3600,6 +3846,7 @@ class TG10Window(QMainWindow):
             self._close_can_connection()
             self.can_backend = None
             self.can_reader = None
+            self.monitor_backend = None
 
             self.set_status(
                 f"Connection failed on {port}"
