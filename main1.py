@@ -8,9 +8,27 @@ Run:
 Requirement:
     pip install PySide6 pyserial
 """
-
 import sys
 import os
+
+# ============================================================
+# TG10 BACKEND PATH
+# ============================================================
+# TG10_Control_GUI_v1 and TG10_CAN are sibling folders:
+#
+# C-DAC IISc NQM Internship/
+# ├── TG10_Control_GUI_v1/
+# └── TG10_CAN/
+#
+# Add TG10_CAN to Python's module search path so the GUI can
+# use the existing backend without copying backend files.
+TG10_CAN_DIR = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "TG10_CAN")
+)
+
+if TG10_CAN_DIR not in sys.path:
+    sys.path.insert(0, TG10_CAN_DIR)
+
 from PySide6.QtCore import Qt, QPointF, QRectF, QTimer
 from PySide6.QtGui import (
     QFont, QPainter, QPen, QColor, QPolygonF, QBrush, QPixmap
@@ -791,7 +809,7 @@ class COMDialog(QDialog):
         form.addRow("COM Port:", self.com_port)
 
         # These communication parameters are fixed for this TG10 setup.
-        self.com_bps = self._fixed_field("9600")
+        self.com_bps = self._fixed_field("200000")
         form.addRow("COM BPS:", self.com_bps)
 
         self.can_mode = self._fixed_field("Normal")
@@ -1329,10 +1347,8 @@ class TG10Window(QMainWindow):
     # ========================================================
 
     def navigation(self):
-
         w = QWidget()
         w.setObjectName("TabBar")
-
         w.setMinimumHeight(38)
         w.setMaximumHeight(38)
 
@@ -1352,33 +1368,32 @@ class TG10Window(QMainWindow):
             "Output",
             "Monitor",
             "Other",
-            "Preset manager"
+            "Preset manager",
         ]
 
         for i, name in enumerate(names):
-
             b = QPushButton(name)
             b.setObjectName("Tab")
             b.setCheckable(True)
             b.setCursor(Qt.PointingHandCursor)
-
-            b.clicked.connect(
-                lambda checked, name=name: (
-                    self.highlight_section(name),
-                    self.highlight_header_buttons(name)
-                )
-            )
-
+            b.clicked.connect(lambda checked, name=name: self._navigation_clicked(name))
             if i == 0:
                 b.setChecked(True)
-
             group.addButton(b, i)
-
             h.addWidget(b)
 
         h.addStretch()
-
         return w
+
+    def _navigation_clicked(self, name):
+        """Handle dashboard navigation, including the Other popup."""
+        self.highlight_header_buttons(name)
+
+        if name == "Other":
+            self.open_other()
+            return
+
+        self.highlight_section(name)
 
     def highlight_header_buttons(self, name):
         """Highlight DELAY/PRESETS buttons in the header near COM."""
@@ -1425,72 +1440,67 @@ class TG10Window(QMainWindow):
     # ========================================================
 
     def dashboard(self):
+        """Main TG10 dashboard.
 
+        Layout:
+            LEFT   : Sync / Output
+            MIDDLE : Configuration 1/2 / Frequency-Period
+            RIGHT  : Monitor + Live Parameters
+
+        The Other section is intentionally removed from the dashboard.  It is
+        opened as a compact dialog from the Other navigation button.
+        """
         page = QWidget()
 
         grid = QGridLayout(page)
-
         grid.setContentsMargins(8, 6, 8, 6)
-
-        grid.setHorizontalSpacing(6)
-        grid.setVerticalSpacing(6)
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(10)
 
         sync = self.sync_card()
         config = self.config_card()
         freq = self.frequency_card()
         output = self.output_card()
         monitor = self.monitor_card()
-        other = self.other_card()
 
-        # Defensive validation: every dashboard section must return its QFrame.
-        dashboard_cards = {
-            "Sync": sync,
-            "Config 1/2": config,
-            "Freq / Period": freq,
-            "Output": output,
-            "Monitor": monitor,
-            "Other": other,
-        }
-        missing_cards = [name for name, widget in dashboard_cards.items() if widget is None]
-        if missing_cards:
-            raise RuntimeError(
-                "Dashboard card returned None: " + ", ".join(missing_cards)
-            )
-
-        # Store dashboard sections for navigation highlighting
         self.section_cards = {
             "Sync": sync,
             "Freq / Period": freq,
             "Config 1/2": config,
             "Output": output,
             "Monitor": monitor,
-            "Other": other,
         }
 
-        # ----------------------------------------------------
-        # MAIN DASHBOARD
-        # ----------------------------------------------------
-        # The dashboard Live parameter strip is intentionally not placed
-        # between Sync/Config and Output/Frequency. Live parameters now
-        # belong below the Monitor output table.
-        grid.addWidget(sync, 0, 0)
-        grid.addWidget(config, 0, 1)
-        grid.addWidget(monitor, 0, 2, 3, 1)
-        grid.addWidget(output, 1, 0)
-        grid.addWidget(freq, 1, 1)
-        grid.addWidget(other, 2, 0, 1, 2)
+        for card in (sync, config, freq, output, monitor):
+            card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-        grid.setColumnStretch(0, 43)
-        grid.setColumnStretch(1, 17)
-        grid.setColumnStretch(2, 40)
+        # LEFT: Sync above Output.
+        left_column = QWidget()
+        left_layout = QVBoxLayout(left_column)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(8)
+        left_layout.addWidget(sync, 1)
+        left_layout.addWidget(output, 1)
 
-        grid.setRowMinimumHeight(0, 390)
-        grid.setRowMinimumHeight(1, 170)
-        grid.setRowMinimumHeight(2, 80)
+        # MIDDLE: Configuration above Frequency / Period.
+        middle_column = QWidget()
+        middle_layout = QVBoxLayout(middle_column)
+        middle_layout.setContentsMargins(0, 0, 0, 0)
+        middle_layout.setSpacing(8)
+        middle_layout.addWidget(config, 1)
+        middle_layout.addWidget(freq, 1)
 
-        grid.setRowStretch(0, 34)
-        grid.setRowStretch(1, 18)
-        grid.setRowStretch(2, 7)
+        grid.addWidget(left_column, 0, 0, 2, 1)
+        grid.addWidget(middle_column, 0, 1, 2, 1)
+        grid.addWidget(monitor, 0, 2, 2, 1)
+
+        # Keep Sync/Config horizontally compact while giving Monitor enough
+        # width for all eight output rows and the two live-parameter tiles.
+        grid.setColumnStretch(0, 38)
+        grid.setColumnStretch(1, 27)
+        grid.setColumnStretch(2, 35)
+        grid.setRowStretch(0, 1)
+        grid.setRowStretch(1, 1)
 
         return page
 
@@ -1530,9 +1540,6 @@ class TG10Window(QMainWindow):
         sync_layout.addWidget(self.dashboard_live_sync)
         layout.addWidget(sync_tile, 1)
 
-        self.dashboard_live_note = label("Internal timing reference", "SmallGrey")
-        layout.addWidget(self.dashboard_live_note)
-
         self._update_other_live_parameter()
         return frame
 
@@ -1541,340 +1548,167 @@ class TG10Window(QMainWindow):
     # ========================================================
 
     def sync_card(self):
-        """TG10-style Synchronization section with the exact 3-column geometry.
+        """Unified TG10 Sync section matching the approved layout.
 
-        Geometry:
-
-            Internal + One shot trigger | External SINGLE IN | External DUAL IN
-
-        The External SINGLE IN and External DUAL IN panels occupy the full
-        vertical height.  Their height is equal to the combined height of
-        the Internal and One shot trigger panels on the left.
+        There is one Sync Set button only.  It sits directly above the MHz
+        unit column.  The four synchronization modes share one compact grid;
+        there are no separate inner Sync boxes.
         """
-        frame, body = make_card("∿", "Synchronization (Sync)")
+        frame, body = make_card("∿", "Synchronization (Sync)", collapsible=False)
 
-        # ------------------------------------------------------------
-        # TOP ROW — four synchronization mode selectors
-        # ------------------------------------------------------------
         mode_group = QButtonGroup(self)
         mode_group.setExclusive(True)
         self.sync_mode_group = mode_group
 
-        mode_names = [
-            "Internal",
-            "External SINGLE IN",
-            "External DUAL IN",
-            "One shot trigger",
+        self.internal_radio = QRadioButton("Internal")
+        self.single_radio = QRadioButton("External\nSINGLE IN")
+        self.dual_radio = QRadioButton("External\nDUAL IN")
+        self.oneshot_radio = QRadioButton("One shot\ntrigger")
+
+        radios = [
+            self.internal_radio,
+            self.single_radio,
+            self.dual_radio,
+            self.oneshot_radio,
         ]
-
-        # Keep ALL FOUR synchronization modes on ONE horizontal row.
-        # Fixed widths prevent Qt from wrapping the long labels into a
-        # second row when the Sync card is resized.
-        mode_row = QHBoxLayout()
-        mode_row.setContentsMargins(2, 0, 2, 4)
-        mode_row.setSpacing(8)
-
-        mode_buttons = []
-        mode_widths = [
-            92,   # Internal
-            165,  # External SINGLE IN
-            165,  # External DUAL IN
-            145,  # One shot trigger
-        ]
-
-        for idx, (name, width) in enumerate(zip(mode_names, mode_widths)):
-            radio = QRadioButton(name)
-            radio.setObjectName("SyncModeRadio")
-            radio.setChecked(idx == 0)
+        for i, radio in enumerate(radios):
             radio.setCursor(Qt.PointingHandCursor)
-            radio.setFixedWidth(width)
-            radio.setMinimumHeight(30)
-            radio.setMaximumHeight(30)
-            radio.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-            mode_group.addButton(radio, idx)
-            mode_buttons.append(radio)
-            mode_row.addWidget(radio, 0)
+            radio.setMinimumHeight(34)
+            radio.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            mode_group.addButton(radio, i)
 
-        # Consume any remaining horizontal space without moving the
-        # synchronization options onto another row.
-        mode_row.addStretch(1)
-
-        self.internal_radio, self.single_radio, self.dual_radio, self.oneshot_radio = mode_buttons
+        self.internal_radio.setChecked(True)
         mode_group.idClicked.connect(self._sync_mode_selected)
-        body.addLayout(mode_row)
+
+        grid = QGridLayout()
+        grid.setContentsMargins(2, 0, 2, 0)
+        grid.setHorizontalSpacing(7)
+        grid.setVerticalSpacing(3)
+
+        # Columns:
+        # 0 = main mode radio
+        # 1 = mode/secondary label
+        # 2 = source/field label or source radio
+        # 3 = value/source radio
+        # 4 = MHz/unit column
+        grid.setColumnStretch(0, 0)
+        grid.setColumnStretch(1, 0)
+        grid.setColumnStretch(2, 0)
+        grid.setColumnStretch(3, 1)
+        grid.setColumnStretch(4, 0)
 
         # ------------------------------------------------------------
-        # CONTENT — 3 columns
-        #
-        #   Column 0: Internal + One shot trigger
-        #   Column 1: External SINGLE IN (full height)
-        #   Column 2: External DUAL IN (full height)
-        #
-        # The two right-hand panels are deliberately the same total
-        # height as the two stacked panels on the left.
+        # ONE Sync Set button — directly above the MHz column.
         # ------------------------------------------------------------
-        content = QHBoxLayout()
-        content.setContentsMargins(0, 0, 0, 0)
-        content.setSpacing(10)
-
-        left_column = QVBoxLayout()
-        left_column.setContentsMargins(0, 0, 0, 0)
-        left_column.setSpacing(8)
-
-        def style_sync_panel(panel, title_text, icon_text="◈"):
-            outer = panel.layout()
-            old_header = outer.itemAt(0).widget()
-            old_header.deleteLater()
-
-            new_header = QWidget()
-            new_header_layout = QHBoxLayout(new_header)
-            new_header_layout.setContentsMargins(10, 5, 8, 3)
-            new_header_layout.setSpacing(5)
-
-            icon = QLabel(icon_text)
-            icon.setObjectName("SyncPanelIcon")
-            icon.setStyleSheet(
-                "color:#1976b9; font-size:12px; font-weight:800; background:transparent;"
-            )
-            title = QLabel(title_text)
-            title.setObjectName("SyncPanelTitle")
-            title.setStyleSheet(
-                "color:#124a7c; font-size:12px; font-weight:800; background:transparent;"
-            )
-            new_header_layout.addWidget(icon)
-            new_header_layout.addWidget(title)
-            new_header_layout.addStretch()
-            outer.insertWidget(0, new_header)
+        sync_set = QPushButton("Set")
+        sync_set.setObjectName("SmallBtn")
+        sync_set.setFixedSize(62, 30)
+        sync_set.setCursor(Qt.PointingHandCursor)
+        sync_set.clicked.connect(self._set_sync_hardware)
+        grid.addWidget(sync_set, 0, 4, Qt.AlignCenter)
 
         # ------------------------------------------------------------
-        # INTERNAL — left column, upper half
+        # INTERNAL
         # ------------------------------------------------------------
-        internal, il = make_subpanel("")
-        style_sync_panel(internal, "Internal", "◈")
+        grid.addWidget(self.internal_radio, 1, 0, 1, 2)
+        grid.addWidget(label("Clock", "FieldLabel", True), 1, 2)
 
-        # The TG10 internal clock is a fixed 100 MHz timing reference.
-        # It is displayed as a read-only value, not a spin box, because
-        # there is no user-adjustable increase/decrease control here.
-        self.internal_freq = QLineEdit("100.000 MHz")
+        self.internal_freq = QLineEdit("100.000")
         self.internal_freq.setReadOnly(True)
         self.internal_freq.setAlignment(Qt.AlignCenter)
-        self.internal_freq.setFixedHeight(27)
-        self.internal_freq.setMinimumWidth(105)
-
-        il.addWidget(label("Clock", "FieldLabel"))
-        il.addWidget(self.internal_freq)
-        # The internal panel intentionally shows only the fixed 100 MHz clock.
-        # Do not add a separate "Timing reference" line here.
-        il.addStretch()
+        self.internal_freq.setFixedHeight(28)
+        grid.addWidget(self.internal_freq, 1, 3)
+        grid.addWidget(label("MHz", "FieldLabel", True), 1, 4, Qt.AlignCenter)
 
         # ------------------------------------------------------------
-        # ONE SHOT TRIGGER — left column, lower half
+        # EXTERNAL SINGLE IN
         # ------------------------------------------------------------
-        oneshot, ol = make_subpanel("")
-        style_sync_panel(oneshot, "One shot trigger", "◈")
+        grid.addWidget(self.single_radio, 2, 0, 2, 2, Qt.AlignVCenter)
 
-        self.software_trigger = QRadioButton("Software")
-        self.smart_trigger = QRadioButton("Smart")
-        self.software_trigger.setChecked(False)
-
-        self.one_shot_group = QButtonGroup(oneshot)
-        self.one_shot_group.setExclusive(True)
-        self.one_shot_group.addButton(self.software_trigger)
-        self.one_shot_group.addButton(self.smart_trigger)
-
-        # Place Software and Smart vertically, centered in the One shot
-        # trigger panel, matching the user's sketch.
-        trigger_column = QVBoxLayout()
-        trigger_column.setContentsMargins(0, 2, 0, 2)
-        trigger_column.setSpacing(4)
-        trigger_column.setAlignment(Qt.AlignCenter)
-
-        # Keep both radio buttons on one straight vertical axis while the
-        # whole group remains centered inside the One shot trigger panel.
-        trigger_stack = QWidget()
-        trigger_stack.setFixedWidth(105)
-        trigger_stack_layout = QVBoxLayout(trigger_stack)
-        trigger_stack_layout.setContentsMargins(0, 0, 0, 0)
-        trigger_stack_layout.setSpacing(4)
-        trigger_stack_layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        trigger_stack_layout.addWidget(self.software_trigger)
-        trigger_stack_layout.addWidget(self.smart_trigger)
-
-        trigger_column.addWidget(trigger_stack, 0, Qt.AlignCenter)
-
-        ol.setContentsMargins(8, 2, 8, 2)
-        ol.setSpacing(2)
-        ol.addStretch(1)
-        ol.addLayout(trigger_column)
-        ol.addStretch(1)
-
-        # ------------------------------------------------------------
-        # EXTERNAL SINGLE IN — full-height middle column
-        # ------------------------------------------------------------
-        single, sl = make_subpanel("")
-        style_sync_panel(single, "External SINGLE IN", "◈")
-
-        sl.setSpacing(9)
-
-        sl.addWidget(label("Source", "FieldLabel"))
-
-        source_row = QHBoxLayout()
-        source_row.setContentsMargins(0, 0, 0, 0)
-        source_row.setSpacing(14)
-
-        self.single_source_group = QButtonGroup(single)
+        self.single_source_group = QButtonGroup(self)
         self.single_source_group.setExclusive(True)
-
         self.single_source_sync_radio = QRadioButton("SYNC IN")
         self.single_source_clk_radio = QRadioButton("CLK IN")
-        self.single_source_clk_radio.setChecked(False)
-
+        self.single_source_sync_radio.setChecked(True)
         self.single_source_group.addButton(self.single_source_sync_radio, 0)
         self.single_source_group.addButton(self.single_source_clk_radio, 1)
-        source_row.addWidget(self.single_source_sync_radio)
-        source_row.addWidget(self.single_source_clk_radio)
-        source_row.addStretch()
-        sl.addLayout(source_row)
 
-        rate_label_row = QHBoxLayout()
-        rate_label_row.setContentsMargins(0, 4, 0, 0)
-        rate_label_row.addWidget(label("Rate", "FieldLabel"))
-        rate_label_row.addStretch()
-        sl.addLayout(rate_label_row)
+        # SYNC IN and CLK IN are straight horizontally with External.
+        grid.addWidget(self.single_source_sync_radio, 2, 2)
+        grid.addWidget(self.single_source_clk_radio, 2, 3)
 
-        # Numeric rate with the unit directly underneath, so MHz is clearly
-        # visible below the value instead of beside it.
-        rate_block = QVBoxLayout()
-        rate_block.setContentsMargins(0, 0, 0, 0)
-        rate_block.setSpacing(2)
-
+        grid.addWidget(label("Rate", "FieldLabel", True), 3, 2)
         self.external_rate = QDoubleSpinBox()
         self.external_rate.setDecimals(6)
-        self.external_rate.setValue(99.99)
-        self.external_rate.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-
-        self.single_rate_unit = combo(["MHz", "kHz", "Hz"], 70)
-        self.single_rate_unit.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-
-        rate_block.addWidget(self.external_rate)
-        unit_row = QHBoxLayout()
-        unit_row.setContentsMargins(0, 0, 0, 0)
-        unit_row.setSpacing(0)
-        # Keep MHz directly below the numeric field, aligned to its left edge.
-        unit_row.addWidget(self.single_rate_unit, 0, Qt.AlignLeft)
-        unit_row.addStretch(1)
-        rate_block.addLayout(unit_row)
-
-        sl.addLayout(rate_block)
-        sl.addStretch()
+        self.external_rate.setValue(10.0)
+        self.external_rate.setFixedHeight(28)
+        grid.addWidget(self.external_rate, 3, 3)
+        self.single_rate_unit = combo(["MHz", "kHz", "Hz"], 62)
+        grid.addWidget(self.single_rate_unit, 3, 4)
 
         # ------------------------------------------------------------
-        # EXTERNAL DUAL IN — full-height right column
+        # EXTERNAL DUAL IN
         # ------------------------------------------------------------
-        dual, dl = make_subpanel("")
-        style_sync_panel(dual, "External DUAL IN", "◈")
+        grid.addWidget(self.dual_radio, 4, 0, 2, 2, Qt.AlignVCenter)
 
-        # Each Dual-IN value gets its unit directly UNDER the numeric field,
-        # matching the requested TG10 sketch:
-        #
-        #   SYNC IN   [1.000000]
-        #                [MHz]
-        #
-        #   CLK IN    [99.990000]
-        #                [MHz]
-        def dual_value_block(spin, unit_combo):
-            block = QVBoxLayout()
-            block.setContentsMargins(0, 0, 0, 0)
-            block.setSpacing(2)
-            block.addWidget(spin)
-            block.addWidget(unit_combo, 0, Qt.AlignLeft)
-            return block
-
-        r3 = QHBoxLayout()
-        r3.setContentsMargins(0, 0, 0, 0)
-        r3.setSpacing(4)
-        r3.addWidget(label("SYNC IN", "FieldLabel"))
+        grid.addWidget(label("SYNC IN", "FieldLabel", True), 4, 2)
         self.dual_sync_input = QDoubleSpinBox()
         self.dual_sync_input.setDecimals(6)
         self.dual_sync_input.setValue(1.0)
-        self.dual_sync_unit = combo(["MHz", "kHz", "Hz"], 70)
-        r3.addLayout(dual_value_block(
-            self.dual_sync_input,
-            self.dual_sync_unit
-        ), 1)
-        dl.addLayout(r3)
+        self.dual_sync_input.setFixedHeight(28)
+        grid.addWidget(self.dual_sync_input, 4, 3)
+        self.dual_sync_unit = combo(["MHz", "kHz", "Hz"], 62)
+        grid.addWidget(self.dual_sync_unit, 4, 4)
 
-        r4 = QHBoxLayout()
-        r4.setContentsMargins(0, 0, 0, 0)
-        r4.setSpacing(4)
-        r4.addWidget(label("CLK IN", "FieldLabel"))
+        grid.addWidget(label("CLK IN", "FieldLabel", True), 5, 2)
         self.dual_clk_input = QDoubleSpinBox()
         self.dual_clk_input.setDecimals(6)
         self.dual_clk_input.setValue(99.99)
-        self.dual_clk_unit = combo(["MHz", "kHz", "Hz"], 70)
-        r4.addLayout(dual_value_block(
-            self.dual_clk_input,
-            self.dual_clk_unit
-        ), 1)
-        dl.addLayout(r4)
-        dl.addStretch()
+        self.dual_clk_input.setFixedHeight(28)
+        grid.addWidget(self.dual_clk_input, 5, 3)
+        self.dual_clk_unit = combo(["MHz", "kHz", "Hz"], 62)
+        grid.addWidget(self.dual_clk_unit, 5, 4)
 
         # ------------------------------------------------------------
-        # Assemble the exact geometry.
+        # ONE SHOT / SOFTWARE / SMART
+        # All three radios are on one horizontal line, with their labels
+        # split over two lines exactly as in the approved sketch.
         # ------------------------------------------------------------
-        left_column.addWidget(internal, 1)
-        left_column.addWidget(oneshot, 1)
+        grid.addWidget(self.oneshot_radio, 6, 0, 1, 2)
 
-        content.addLayout(left_column, 1)
-        content.addWidget(single, 1.8)
-        content.addWidget(dual, 2.0)
+        self.software_trigger = QRadioButton("Software\ntrigger")
+        self.smart_trigger = QRadioButton("Smart\ntrigger")
+        self.one_shot_group = QButtonGroup(self)
+        self.one_shot_group.setExclusive(True)
+        self.one_shot_group.addButton(self.software_trigger, 0)
+        self.one_shot_group.addButton(self.smart_trigger, 1)
+        grid.addWidget(self.software_trigger, 6, 2, 1, 1)
+        grid.addWidget(self.smart_trigger, 6, 3, 1, 2)
 
-        body.addLayout(content, 1)
+        body.addLayout(grid)
+        body.addStretch(1)
 
+        # Keep the existing hardware integration untouched.
         self.sync_panels = {
-            "Internal": internal,
-            "External SINGLE IN": single,
-            "External DUAL IN": dual,
-            "One shot trigger": oneshot,
+            "Internal": self.internal_freq,
+            "External SINGLE IN": self.external_rate,
+            "External DUAL IN": self.dual_sync_input,
+            "One shot trigger": self.software_trigger,
         }
 
-        # ------------------------------------------------------------
-        # Signal connections
-        # ------------------------------------------------------------
-        self.single_source_group.idClicked.connect(
-            self._single_source_selected
-        )
-        self.single_rate_unit.currentTextChanged.connect(
-            self._update_single_rate_range
-        )
-        self.external_rate.valueChanged.connect(
-            self._update_other_live_parameter
-        )
-        self.dual_sync_unit.currentTextChanged.connect(
-            self._update_dual_rate_ranges
-        )
-        self.dual_clk_unit.currentTextChanged.connect(
-            self._update_dual_rate_ranges
-        )
-        self.dual_sync_input.valueChanged.connect(
-            self._update_other_live_parameter
-        )
-        self.dual_clk_input.valueChanged.connect(
-            self._update_other_live_parameter
-        )
+        self.single_source_group.idClicked.connect(self._single_source_selected)
+        self.single_rate_unit.currentTextChanged.connect(self._update_single_rate_range)
+        self.external_rate.valueChanged.connect(self._update_other_live_parameter)
+        self.dual_sync_unit.currentTextChanged.connect(self._update_dual_rate_ranges)
+        self.dual_clk_unit.currentTextChanged.connect(self._update_dual_rate_ranges)
+        self.dual_sync_input.valueChanged.connect(self._update_other_live_parameter)
+        self.dual_clk_input.valueChanged.connect(self._update_other_live_parameter)
 
         self._update_single_rate_range()
         self._update_dual_rate_ranges()
         self._sync_mode_selected(0)
         self._update_other_live_parameter()
 
-        add_card_action(
-            frame,
-            lambda: (
-                self._commit_sync_to_monitor(),
-                self.set_status(f"Sync set: {self.sync_mode}")
-            )
-        )
         return frame
 
     def _single_source_selected(self, index):
@@ -1943,6 +1777,205 @@ class TG10Window(QMainWindow):
                     )
 
         self._update_other_live_parameter()
+
+    def _run_existing_sync_sequence(self, sequence_name):
+        """Run one of the existing TG10 Sync sequences from the backend.
+
+        No CAN ID, register address, payload, or sequence is invented here.
+        The GUI only selects a sequence that already exists in
+        Sy4000_can_control_org.py.
+        """
+        if not self.connection_state or self.serial_connection is None:
+            raise RuntimeError("TG10 is not connected. Open COM and connect first.")
+
+        backend = self.can_backend
+        if backend is None:
+            raise RuntimeError("TG10 CAN backend is not loaded.")
+
+        sequence = getattr(backend, sequence_name, None)
+        if sequence is None:
+            raise AttributeError(
+                f"Existing backend sequence '{sequence_name}' was not found."
+            )
+
+        run_sequence = getattr(backend, "run_sequence", None)
+        if not callable(run_sequence):
+            raise AttributeError(
+                "Sy4000_can_control_org.run_sequence() is not available."
+            )
+
+        run_sequence(self.serial_connection, sequence)
+
+    def _read_sync_hardware_status(self):
+        """Read the existing readv1 status dictionary after a Sync write."""
+        if not self.connection_state or self.serial_connection is None:
+            raise RuntimeError("TG10 is not connected.")
+
+        reader = self.can_reader
+        if reader is None:
+            raise RuntimeError("readv1 backend is not loaded.")
+
+        read_status = getattr(reader, "read_status", None)
+        if not callable(read_status):
+            raise AttributeError("readv1.read_status() is not available.")
+
+        return read_status(self.serial_connection, show=False)
+
+    @staticmethod
+    def _format_hz(value):
+        if value is None:
+            return "--"
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            return str(value)
+
+        if value >= 1e6:
+            return f"{value / 1e6:.6f} MHz"
+        if value >= 1e3:
+            return f"{value / 1e3:.6f} kHz"
+        return f"{value:.3f} Hz"
+
+    def _apply_hardware_sync_status(self, status):
+        """Reflect the readv1 hardware dictionary in the Sync live displays."""
+        if not isinstance(status, dict):
+            raise RuntimeError("readv1.read_status() did not return a dictionary.")
+
+        mode = status.get("mode")
+        clk = status.get("clk_in_hz")
+        sync = status.get("sync_in_hz")
+        out_hz = status.get("freq_hz")
+        ratediv = status.get("ratediv")
+
+        mode_names = {
+            "internal": "Internal",
+            "ext_clk": "External SINGLE IN",
+            "ext_sync": "External SINGLE IN",
+            "ext_dual": "External DUAL IN",
+            "oneshot": "One shot trigger",
+            "smart": "One shot trigger",
+        }
+        display_mode = mode_names.get(mode, str(mode) if mode else "Unknown")
+
+        # Hardware values, rather than the currently edited GUI spin boxes,
+        # are shown after a successful Set/readback cycle.
+        if hasattr(self, "other_live_clk"):
+            self.other_live_clk.setText(
+                "CLK IN: " + self._format_hz(clk)
+            )
+            self.other_live_sync.setText(
+                "SYNC IN: " + self._format_hz(sync)
+            )
+
+        if hasattr(self, "monitor_live_clk"):
+            self.monitor_live_clk.setText(self._format_hz(clk))
+            self.monitor_live_sync.setText(self._format_hz(sync))
+            self.monitor_live_note.setText(
+                f"Hardware: {display_mode}"
+                + (f" | Output: {self._format_hz(out_hz)}" if out_hz else "")
+                + (f" | Ratediv: {ratediv}" if ratediv is not None else "")
+            )
+
+        if hasattr(self, "dashboard_live_clk"):
+            self.dashboard_live_clk.setText(self._format_hz(clk))
+            self.dashboard_live_sync.setText(self._format_hz(sync))
+            self.dashboard_live_note.setText(
+                f"Hardware: {display_mode}"
+            )
+
+        # Keep the monitor's committed Sync label aligned with the actual
+        # hardware mode. Do not silently change the user's editable controls.
+        self.committed_sync_mode = display_mode
+        self.hardware_sync_status = status
+
+        return display_mode
+
+    def _set_sync_hardware(self):
+        """Apply the currently selected Sync mode using existing backend data."""
+        if not self.connection_state:
+            QMessageBox.warning(
+                self,
+                "TG10 Sync",
+                "Connect to TG10 before pressing Sync → Set."
+            )
+            return
+
+        mode = getattr(self, "sync_mode", "Internal")
+        sequence_name = None
+        detail = mode
+
+        if mode == "Internal":
+            sequence_name = "INTERNAL_100MHz_SEQUENCE"
+
+        elif mode == "External SINGLE IN":
+            source = self._single_source_name()
+
+            if source == "CLK IN":
+                sequence_name = "EXTERNALSINGLEIN_CLKIN_100MHz_SEQUENCE"
+                detail = "External SINGLE IN → CLK IN"
+            elif source == "SYNC IN":
+                sequence_name = "EXTERNALSINGLEIN_SYNCIN_10MHZ_SEQUENCE"
+                detail = "External SINGLE IN → SYNC IN"
+            else:
+                QMessageBox.warning(
+                    self,
+                    "TG10 Sync",
+                    "Select CLK IN or SYNC IN for External SINGLE IN."
+                )
+                return
+
+        elif mode == "External DUAL IN":
+            sequence_name = "EXTERNALDUALIN_CLKIN_100MHZ_SYNCIN_20MHZ_SEQUENCE"
+            detail = "External DUAL IN"
+
+        elif mode == "One shot trigger":
+            if hasattr(self, "software_trigger") and self.software_trigger.isChecked():
+                sequence_name = "ONESHOT_TRIGGER_SOFTWARETRIG"
+                detail = "One shot trigger → Software"
+            elif hasattr(self, "smart_trigger") and self.smart_trigger.isChecked():
+                sequence_name = "ONESHOT_TRIGGER_SMARTTRIG"
+                detail = "One shot trigger → Smart"
+            else:
+                QMessageBox.warning(
+                    self,
+                    "TG10 Sync",
+                    "Select Software or Smart trigger for One shot trigger."
+                )
+                return
+
+        if sequence_name is None:
+            QMessageBox.warning(
+                self,
+                "TG10 Sync",
+                f"No existing backend sequence is mapped for '{mode}'."
+            )
+            return
+
+        try:
+            self.set_status(f"Applying Sync: {detail} …")
+            QApplication.processEvents()
+
+            self._run_existing_sync_sequence(sequence_name)
+
+            # Read the actual TG10 state after the write. This is the
+            # verification step required before trusting GUI state.
+            status = self._read_sync_hardware_status()
+            detected = self._apply_hardware_sync_status(status)
+
+            self._update_monitor_values()
+            self.set_status(
+                f"Sync applied: {detail} | TG10 readback: {detected}"
+            )
+
+        except Exception as exc:
+            self.set_status("Sync apply failed")
+            QMessageBox.critical(
+                self,
+                "TG10 Sync Error",
+                f"Could not apply the existing TG10 Sync sequence.\n\n"
+                f"Sequence: {sequence_name}\n"
+                f"Error: {exc}"
+            )
 
     def _commit_sync_to_monitor(self):
         self.committed_sync_mode = self.sync_mode
@@ -2162,21 +2195,12 @@ class TG10Window(QMainWindow):
     # ========================================================
 
     def config_card(self):
-        """Configuration 1/2 card arranged like the user's sketch.
-
-        Layout:
-            LEFT COLUMN  : Normal / Gate / Frequency divider
-            RIGHT COLUMN : Burst (full height)
-
-        Keeping all four mode boxes visible removes the large empty area that
-        appeared when the selected mode had few/no dynamic controls.
-        """
-        frame, body = make_card("⚙", "Configuration 1 / 2")
-        frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        frame.setFixedHeight(300)
+        """Compact Configuration 1/2 layout matching the approved sketch."""
+        frame, body = make_card("⚙", "Configuration 1 / 2", collapsible=False)
+        frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self._config_card_frame = frame
 
-        body.setContentsMargins(12, 0, 12, 8)
+        body.setContentsMargins(8, 0, 8, 8)
         body.setSpacing(4)
 
         self.config_settings = {
@@ -2191,35 +2215,12 @@ class TG10Window(QMainWindow):
         self.active_config_name = "Config 1"
         self.committed_config_name = "Config 1"
 
-        # ------------------------------------------------------------
-        # MODE label above all four mutually-exclusive mode boxes.
-        # ------------------------------------------------------------
-        body.addWidget(label("Mode", "FieldLabel", bold=True))
-
-        # ------------------------------------------------------------
-        # Four mode boxes, arranged exactly as the sketch:
-        #
-        #   ┌──────────────┐   ┌─────────────────────────────┐
-        #   │ ○ Normal     │   │ ○ Burst                    │
-        #   └──────────────┘   │ Burst trigger               │
-        #   ┌──────────────┐   │ ○ SYNC IN  ○ GATE           │
-        #   │ ○ Gate       │   │ ○ nGATE   ○ Software        │
-        #   │ ○ GATE       │   │ Burst count                 │
-        #   │ ○ nGATE      │   │ [                       ]   │
-        #   └──────────────┘   └─────────────────────────────┘
-        #   ┌──────────────┐
-        #   │ Frequency    │
-        #   │ divider      │
-        #   │ Division ... │
-        #   │ [          ] │
-        #   └──────────────┘
-        # ------------------------------------------------------------
         content_grid = QGridLayout()
         content_grid.setContentsMargins(0, 0, 0, 0)
-        content_grid.setHorizontalSpacing(8)
-        content_grid.setVerticalSpacing(6)
+        content_grid.setHorizontalSpacing(7)
+        content_grid.setVerticalSpacing(5)
         content_grid.setColumnStretch(0, 1)
-        content_grid.setColumnStretch(1, 2)
+        content_grid.setColumnStretch(1, 1)
         content_grid.setRowStretch(0, 1)
         content_grid.setRowStretch(1, 1)
         content_grid.setRowStretch(2, 1)
@@ -2228,160 +2229,105 @@ class TG10Window(QMainWindow):
         self.config_mode_group.setExclusive(True)
         self.config_mode_buttons = {}
 
-        def mode_box(mode_name, parent=None):
-            box = QFrame(parent)
+        def mode_box():
+            box = QFrame()
             box.setObjectName("ConfigModeBox")
             box.setStyleSheet("""
                 QFrame#ConfigModeBox {
-                    background: #ffffff;
-                    border: 1px solid #c5d4e2;
-                    border-radius: 4px;
+                    background:#ffffff;
+                    border:1px solid #c5d4e2;
+                    border-radius:4px;
                 }
             """)
-            layout = QVBoxLayout(box)
-            layout.setContentsMargins(10, 7, 10, 7)
-            layout.setSpacing(4)
-            return box, layout
+            lay = QVBoxLayout(box)
+            lay.setContentsMargins(8, 6, 8, 6)
+            lay.setSpacing(3)
+            return box, lay
 
-        def add_mode_radio(layout, mode_name):
-            radio = QRadioButton(mode_name)
-            radio.setObjectName("ConfigModeRadio")
-            radio.setCursor(Qt.PointingHandCursor)
-            radio.setMinimumHeight(25)
-            self.config_mode_group.addButton(radio)
-            self.config_mode_buttons[mode_name] = radio
-            layout.addWidget(radio)
-            return radio
+        def mode_radio(lay, name):
+            r = QRadioButton(name)
+            r.setMinimumHeight(24)
+            self.config_mode_group.addButton(r)
+            self.config_mode_buttons[name] = r
+            lay.addWidget(r)
+            return r
 
-        # ---------------- NORMAL ----------------
-        normal_box, normal_layout = mode_box("Normal")
-        add_mode_radio(normal_layout, "Normal")
-        normal_layout.addStretch()
+        # Normal
+        normal_box, normal_lay = mode_box()
+        mode_radio(normal_lay, "Normal")
+        normal_lay.addStretch()
         content_grid.addWidget(normal_box, 0, 0)
 
-        # ---------------- GATE ----------------
-        gate_box, gate_layout = mode_box("Gate")
-        add_mode_radio(gate_layout, "Gate")
-
+        # Gate: NO extra Burst radio. Gate and nGate are horizontal.
+        gate_box, gate_lay = mode_box()
+        mode_radio(gate_lay, "Gate")
         gate_group = QButtonGroup(gate_box)
         gate_group.setExclusive(True)
-        gate_row = QHBoxLayout()
-        gate_row.setContentsMargins(2, 0, 0, 0)
-        gate_row.setSpacing(4)
-
-        self.config_gate_buttons = {}
         self.config_gate_group = gate_group
+        self.config_gate_buttons = {}
+        gate_row = QHBoxLayout()
+        gate_row.setContentsMargins(0, 0, 0, 0)
+        gate_row.setSpacing(5)
         for option in ("GATE", "nGATE"):
-            radio = QRadioButton(option)
-            radio.setMinimumHeight(24)
-            radio.setFixedWidth(82 if option == "GATE" else 88)
-            # Do not pre-select a Gate sub-option while Normal is selected.
-            # The sub-option is selected only when Gate mode is activated.
-            radio.setChecked(False)
-            gate_group.addButton(radio)
-            self.config_gate_buttons[option] = radio
-            radio.toggled.connect(
-                lambda checked, value=option:
-                self._save_config_gate(value, checked)
-            )
-            gate_row.addWidget(radio)
+            r = QRadioButton(option)
+            r.setMinimumHeight(24)
+            gate_group.addButton(r)
+            self.config_gate_buttons[option] = r
+            r.toggled.connect(lambda checked, value=option: self._save_config_gate(value, checked))
+            gate_row.addWidget(r)
         gate_row.addStretch()
-        gate_layout.addLayout(gate_row)
-        gate_layout.addStretch()
+        gate_lay.addLayout(gate_row)
+        gate_lay.addStretch()
         content_grid.addWidget(gate_box, 1, 0)
 
-        # ---------------- FREQUENCY DIVIDER ----------------
-        divider_box, divider_layout = mode_box("Frequency divider")
-        add_mode_radio(divider_layout, "Frequency divider")
-
-        divider_layout.addWidget(
-            label("Division of output frequency", "FieldLabel", bold=True)
-        )
-
-        divider_row = QHBoxLayout()
-        divider_row.setContentsMargins(4, 0, 0, 0)
-        divider_row.setSpacing(7)
-
+        # Frequency divider: radio stays directly beside its label.
+        divider_box, divider_lay = mode_box()
+        mode_radio(divider_lay, "Frequency divider")
+        divider_lay.addWidget(label("Division of Freq", "FieldLabel", bold=True))
         self.config_divider_widget = QSpinBox()
         self.config_divider_widget.setRange(1, 32767)
-        self.config_divider_widget.setValue(
-            self.config_settings["Config 1"]["divider"]
-        )
-        self.config_divider_widget.setFixedWidth(150)
-        self.config_divider_widget.valueChanged.connect(
-            self._save_config_divider
-        )
-        divider_row.addWidget(self.config_divider_widget)
-        divider_row.addStretch()
-        divider_layout.addLayout(divider_row)
-        divider_layout.addStretch()
+        self.config_divider_widget.setValue(1)
+        self.config_divider_widget.setMinimumHeight(28)
+        self.config_divider_widget.valueChanged.connect(self._save_config_divider)
+        divider_lay.addWidget(self.config_divider_widget)
         content_grid.addWidget(divider_box, 2, 0)
 
-        # ---------------- BURST (FULL RIGHT COLUMN) ----------------
-        burst_box, burst_layout = mode_box("Burst")
-        add_mode_radio(burst_layout, "Burst")
-
-        burst_layout.addSpacing(5)
-        burst_layout.addWidget(
-            label("Burst trigger", "FieldLabel", bold=True)
-        )
+        # Burst — full right column.
+        burst_box, burst_lay = mode_box()
+        mode_radio(burst_lay, "Burst")
+        burst_lay.addWidget(label("Burst trigger", "FieldLabel", bold=True))
 
         burst_group = QButtonGroup(burst_box)
         burst_group.setExclusive(True)
-        self.config_burst_buttons = {}
         self.config_burst_group = burst_group
+        self.config_burst_buttons = {}
 
-        # Two rows, as in the sketch.
         trigger_grid = QGridLayout()
-        trigger_grid.setContentsMargins(4, 0, 4, 0)
-        trigger_grid.setHorizontalSpacing(18)
-        trigger_grid.setVerticalSpacing(4)
-
-        options = [
+        trigger_grid.setContentsMargins(0, 0, 0, 0)
+        trigger_grid.setHorizontalSpacing(12)
+        trigger_grid.setVerticalSpacing(2)
+        for option, row, col in [
             ("SYNC IN", 0, 0),
             ("GATE", 0, 1),
             ("nGATE", 1, 0),
             ("Software", 1, 1),
-        ]
-        for option, row, col in options:
-            radio = QRadioButton(option)
-            radio.setMinimumHeight(26)
-            radio.setMinimumWidth(82 if option in ("GATE", "nGATE") else 92)
-            # Do not pre-select a Burst trigger while Normal is selected.
-            # The trigger is selected only when Burst mode is activated.
-            radio.setChecked(False)
-            burst_group.addButton(radio)
-            self.config_burst_buttons[option] = radio
-            radio.toggled.connect(
-                lambda checked, value=option:
-                self._save_config_burst_source(value, checked)
-            )
-            trigger_grid.addWidget(radio, row, col)
-
-        burst_layout.addLayout(trigger_grid)
-        burst_layout.addSpacing(8)
-        burst_layout.addWidget(
-            label("Burst count", "FieldLabel", bold=True)
-        )
-
-        count_row = QHBoxLayout()
-        count_row.setContentsMargins(4, 0, 4, 0)
-        count_row.setSpacing(8)
-
+        ]:
+            r = QRadioButton(option)
+            r.setMinimumHeight(24)
+            burst_group.addButton(r)
+            self.config_burst_buttons[option] = r
+            r.toggled.connect(lambda checked, value=option: self._save_config_burst_source(value, checked))
+            trigger_grid.addWidget(r, row, col)
+        burst_lay.addLayout(trigger_grid)
+        burst_lay.addSpacing(4)
+        burst_lay.addWidget(label("Burst count", "FieldLabel", bold=True))
         self.burst_count_widget = QSpinBox()
         self.burst_count_widget.setRange(1, 65535)
-        self.burst_count_widget.setValue(
-            self.config_settings["Config 1"]["burst_count"]
-        )
-        self.burst_count_widget.setFixedWidth(180)
-        self.burst_count_widget.valueChanged.connect(
-            self._save_config_burst_count
-        )
-        self.config_burst_count_row = count_row
-        count_row.addWidget(self.burst_count_widget)
-        count_row.addStretch()
-        burst_layout.addLayout(count_row)
-        burst_layout.addStretch()
+        self.burst_count_widget.setValue(1)
+        self.burst_count_widget.setMinimumHeight(28)
+        self.burst_count_widget.valueChanged.connect(self._save_config_burst_count)
+        burst_lay.addWidget(self.burst_count_widget)
+        burst_lay.addStretch()
         content_grid.addWidget(burst_box, 0, 1, 3, 1)
 
         body.addLayout(content_grid, 1)
@@ -2390,16 +2336,12 @@ class TG10Window(QMainWindow):
             frame,
             lambda: (
                 self._commit_config_to_monitor(),
-                self.set_status(
-                    f'Config 1/2 set: {self.config_settings["Config 1"]["mode"]}'
-                )
-            )
+                self.set_status(f'Config 1/2 set: {self.config_settings["Config 1"]["mode"]}')
+            ),
+            "Set",
         )
 
-        self.config_mode_group.buttonClicked.connect(
-            self._configuration_mode_radio_clicked
-        )
-
+        self.config_mode_group.buttonClicked.connect(self._configuration_mode_radio_clicked)
         self.config_mode_buttons["Normal"].setChecked(True)
         self._configuration_mode_changed("Normal")
         return frame
@@ -2668,6 +2610,22 @@ class TG10Window(QMainWindow):
         self.output_c1_fall.setCurrentText("DEL1")
         self.output_c1_fall.currentTextChanged.connect(self._output_condition_changed)
         c1_grid.addWidget(self.output_c1_fall, 1, 1)
+
+        c1_grid.addWidget(label("Pulse width", "FieldLabel"), 2, 0)
+        self.output_c1_pulse = QDoubleSpinBox()
+        self.output_c1_pulse.setRange(0.001, 150000000.0)
+        self.output_c1_pulse.setDecimals(2)
+        self.output_c1_pulse.setValue(25.64)
+        self.output_c1_pulse.setFixedHeight(28)
+        self.output_c1_pulse_unit = combo(["ps", "ns", "us"], 58)
+        pulse1_row = QHBoxLayout()
+        pulse1_row.setContentsMargins(0, 0, 0, 0)
+        pulse1_row.setSpacing(4)
+        pulse1_row.addWidget(self.output_c1_pulse)
+        pulse1_row.addWidget(self.output_c1_pulse_unit)
+        pulse1_container = QWidget()
+        pulse1_container.setLayout(pulse1_row)
+        c1_grid.addWidget(pulse1_container, 2, 1)
         condition_row.addWidget(config1, 1)
 
         config2 = QGroupBox("Config 2")
@@ -2687,6 +2645,22 @@ class TG10Window(QMainWindow):
         self.output_c2_fall.setCurrentText("DEL3")
         self.output_c2_fall.currentTextChanged.connect(self._output_condition_changed)
         c2_grid.addWidget(self.output_c2_fall, 1, 1)
+
+        c2_grid.addWidget(label("Pulse width", "FieldLabel"), 2, 0)
+        self.output_c2_pulse = QDoubleSpinBox()
+        self.output_c2_pulse.setRange(0.001, 150000000.0)
+        self.output_c2_pulse.setDecimals(2)
+        self.output_c2_pulse.setValue(25.64)
+        self.output_c2_pulse.setFixedHeight(28)
+        self.output_c2_pulse_unit = combo(["ps", "ns", "us"], 58)
+        pulse2_row = QHBoxLayout()
+        pulse2_row.setContentsMargins(0, 0, 0, 0)
+        pulse2_row.setSpacing(4)
+        pulse2_row.addWidget(self.output_c2_pulse)
+        pulse2_row.addWidget(self.output_c2_pulse_unit)
+        pulse2_container = QWidget()
+        pulse2_container.setLayout(pulse2_row)
+        c2_grid.addWidget(pulse2_container, 2, 1)
         condition_row.addWidget(config2, 1)
 
         body.addLayout(condition_row)
@@ -3095,12 +3069,6 @@ class TG10Window(QMainWindow):
         sync_layout.addWidget(self.monitor_live_sync)
         live_layout.addWidget(sync_tile, 1)
 
-        self.monitor_live_note = label(
-            "Internal timing reference",
-            "SmallGrey"
-        )
-        live_layout.addWidget(self.monitor_live_note)
-
         body.addWidget(live)
 
         self._update_monitor_values()
@@ -3370,69 +3338,48 @@ class TG10Window(QMainWindow):
             "• Live parameter"
         )
 
-    def other_card(self):
+    def open_other(self):
+        """Open the Other controls as a compact popup from the navigation bar.
 
-        frame, body = make_card(
-            "⚒",
-            "Other"
-        )
+        The dashboard has no permanent Other card.  The popup contains only
+        Push trigger and Frequency limit, with the frequency-limit controls
+        below the trigger controls as in the approved TG10 layout.
+        """
+        dialog = QDialog(self)
+        dialog.setWindowTitle("TG10 — Other")
+        dialog.setModal(False)
+        dialog.resize(520, 390)
 
-        # ============================================================
-        # TOP BUTTONS
-        # ============================================================
+        root = QVBoxLayout(dialog)
+        root.setContentsMargins(14, 14, 14, 14)
+        root.setSpacing(8)
 
-        tabs = QHBoxLayout()
-        tabs.setSpacing(5)
+        title_row = QHBoxLayout()
+        title_row.setSpacing(6)
+        title_row.addWidget(label("⚒", "CardIcon"))
+        title_row.addWidget(label("Other", "CardTitle"))
+        title_row.addStretch()
+        root.addLayout(title_row)
 
-        self.other_group = QButtonGroup(frame)
-        self.other_group.setExclusive(True)
+        selector = QHBoxLayout()
+        selector.setContentsMargins(0, 0, 0, 0)
+        selector.setSpacing(28)
+        push_radio = QRadioButton("Push trigger")
+        limit_radio = QRadioButton("Frequency limit")
+        push_radio.setChecked(True)
+        selector.addWidget(push_radio)
+        selector.addWidget(limit_radio)
+        selector.addStretch()
+        root.addLayout(selector)
 
-        self.other_buttons = []
-
-        names = [
-            "Push trigger",
-            "Frequency limit",
-            "Device presets",
-            "Sound",
-            "Info"
-        ]
-
-        for i, name in enumerate(names):
-            button = QRadioButton(name)
-            button.setObjectName("OtherRadio")
-            button.setMinimumHeight(24)
-            button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-
-            if i == 0:
-                button.setChecked(True)
-
-            self.other_group.addButton(button, i)
-            self.other_buttons.append(button)
-            tabs.addWidget(button, 1)
-
-        body.addLayout(tabs)
-
-        # ============================================================
-        # STACKED CONTENT AREA
-        # ============================================================
-
-        self.other_stack = QStackedWidget()
-
-        # ============================================================
-        # PAGE 1 — PUSH TRIGGER
-        # ============================================================
-
-        push_page = QWidget()
-        push_layout = QVBoxLayout(push_page)
-        push_layout.setContentsMargins(6, 3, 6, 3)
-        push_layout.setSpacing(3)
-        push_layout.addWidget(label("Push trigger", None, bold=True, color=DEEP))
-
-        # LCD Display Screens page 63 shows four force-trigger buttons:
-        # One shot trigger, Burst trigger, Latch SET trigger, Latch RESET trigger.
-        trigger_row = QHBoxLayout()
-        trigger_row.setContentsMargins(0, 0, 0, 0)
-        trigger_row.setSpacing(6)
+        # ------------------------------------------------------------
+        # Push trigger
+        # ------------------------------------------------------------
+        push_box = QGroupBox("Push trigger")
+        push_grid = QGridLayout(push_box)
+        push_grid.setContentsMargins(8, 8, 8, 8)
+        push_grid.setHorizontalSpacing(7)
+        push_grid.setVerticalSpacing(6)
 
         self.push_one_shot = QPushButton("One shot trigger")
         self.push_burst = QPushButton("Burst trigger")
@@ -3447,9 +3394,12 @@ class TG10Window(QMainWindow):
 
         for btn in self.push_trigger_buttons:
             btn.setObjectName("Seg")
-            btn.setMinimumHeight(28)
-            btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-            trigger_row.addWidget(btn, 1)
+            btn.setMinimumHeight(31)
+
+        push_grid.addWidget(self.push_one_shot, 0, 0)
+        push_grid.addWidget(self.push_burst, 0, 1)
+        push_grid.addWidget(self.push_latch_set, 1, 0)
+        push_grid.addWidget(self.push_latch_reset, 1, 1)
 
         self.push_one_shot.clicked.connect(
             lambda: self._force_push_trigger("One shot trigger")
@@ -3464,363 +3414,51 @@ class TG10Window(QMainWindow):
             lambda: self._force_push_trigger("Latch RESET trigger")
         )
 
-        push_layout.addLayout(trigger_row)
-        push_layout.addWidget(label("Push button to force trigger", "SmallGrey"))
-        self.other_stack.addWidget(push_page)
+        root.addWidget(push_box)
 
+        # ------------------------------------------------------------
+        # Frequency limit
+        # ------------------------------------------------------------
+        limit_box = QGroupBox("Frequency limit")
+        limit_grid = QGridLayout(limit_box)
+        limit_grid.setContentsMargins(8, 8, 8, 8)
+        limit_grid.setHorizontalSpacing(7)
+        limit_grid.setVerticalSpacing(5)
 
-        # PAGE 6 — LIVE PARAMETER
-        # TG10 manual: live parameters display frequencies at input channels.
-        live_page = QWidget()
-        live_layout = QGridLayout(live_page)
-        live_layout.setContentsMargins(6, 4, 6, 4)
-        live_layout.setHorizontalSpacing(10)
-        live_layout.setVerticalSpacing(5)
-
-        live_layout.addWidget(label("Live parameter", "FieldLabel", True), 0, 0, 1, 2)
-
-        self.other_live_clk = label("CLK IN: --", "TileValue")
-        self.other_live_sync = label("SYNC IN: --", "TileValue")
-
-        live_layout.addWidget(label("CLK IN", "FieldLabel"), 1, 0)
-        live_layout.addWidget(self.other_live_clk, 1, 1)
-        live_layout.addWidget(label("SYNC IN", "FieldLabel"), 2, 0)
-        live_layout.addWidget(self.other_live_sync, 2, 1)
-        live_layout.setColumnStretch(1, 1)
-
-        # Live parameter is intentionally not exposed as an Other radio option.
-        # Its values are still used internally by the Monitor live strip.
-
-        # PAGE 2 — FREQUENCY LIMIT
-        # ============================================================
-
-        frequency_page = QWidget()
-
-        frequency_layout = QHBoxLayout(
-            frequency_page
-        )
-
-        frequency_layout.setContentsMargins(6, 3, 6, 3)
-
-        frequency_layout.setSpacing(
-            10
-        )
-
-        frequency_layout.addWidget(
-            label(
-                "Frequency limit",
-                None,
-                bold=True,
-                color=DEEP
-            )
-        )
-
-        frequency_layout.addWidget(
-            label(
-                "Limit:",
-                "FieldLabel"
-            )
+        limit_grid.addWidget(
+            label("Maximum frequency", "FieldLabel", True),
+            0, 0
         )
 
         self.frequency_limit_value = QDoubleSpinBox()
+        self.frequency_limit_value.setRange(0.00000001, 20.0)
+        self.frequency_limit_value.setDecimals(6)
+        self.frequency_limit_value.setValue(20.0)
+        self.frequency_limit_value.setMinimumHeight(30)
+        limit_grid.addWidget(self.frequency_limit_value, 0, 1)
 
-        # Frequency limit is expressed in MHz and cannot exceed
-        # the TG10 output-frequency maximum of 20 MHz.
-        self.frequency_limit_value.setRange(
-            0.00000001,
-            20.0
+        limit_unit = combo(["MHz", "kHz", "Hz"], 62)
+        limit_grid.addWidget(limit_unit, 0, 2)
+
+        apply_limit = QPushButton("Apply")
+        apply_limit.setObjectName("SmallBtn")
+        apply_limit.clicked.connect(
+            lambda: self.set_status("Frequency limit updated")
         )
+        limit_grid.addWidget(apply_limit, 0, 3)
+        limit_grid.setColumnStretch(1, 1)
 
-        self.frequency_limit_value.setDecimals(
-            3
-        )
+        root.addWidget(limit_box)
 
-        self.frequency_limit_value.setValue(
-            20.000
-        )
+        bottom = QHBoxLayout()
+        bottom.addStretch()
+        close_btn = QPushButton("Close")
+        close_btn.setObjectName("SmallBtn")
+        close_btn.clicked.connect(dialog.accept)
+        bottom.addWidget(close_btn)
+        root.addLayout(bottom)
 
-        frequency_layout.addWidget(
-            self.frequency_limit_value
-        )
-
-        frequency_layout.addWidget(
-            label(
-                "MHz",
-                "FieldLabel"
-            )
-        )
-
-        self.frequency_limit_enable = QCheckBox(
-            "Enable frequency limit"
-        )
-
-        frequency_layout.addWidget(
-            self.frequency_limit_enable
-        )
-
-        frequency_layout.addStretch()
-
-        frequency_apply = QPushButton(
-            "Apply"
-        )
-
-        frequency_apply.setObjectName(
-            "SmallBtn"
-        )
-
-        frequency_apply.clicked.connect(
-            lambda:
-            self.set_status(
-                "Frequency limit updated"
-            )
-        )
-
-        frequency_layout.addWidget(
-            frequency_apply
-        )
-
-        self.other_stack.addWidget(
-            frequency_page
-        )
-
-        # ============================================================
-        # PAGE 3 — DEVICE PRESETS
-        # ============================================================
-
-        device_page = QWidget()
-
-        # Keep the exact height/space allocated to the Other section.
-        # Only the contents inside Device presets are made compact,
-        # matching the small hardcoded preset labels shown on the TG10 LCD.
-        device_layout = QHBoxLayout(
-            device_page
-        )
-
-        device_layout.setContentsMargins(
-            10, 6, 10, 6
-        )
-
-        device_layout.setSpacing(
-            6
-        )
-
-        device_layout.addWidget(
-            label(
-                "Device presets",
-                None,
-                bold=True,
-                color=DEEP,
-                size=11
-            )
-        )
-
-        # Hardcoded TG10 external-device presets.
-        # These are display selections only; no undocumented CAN command
-        # is generated or assumed here.
-        preset_texts = [
-            "1 channel - Pockels cell driver - OUT0-X1",
-            "2 channel - Pockels cell driver - OUT0-X1  OUT2-X2",
-            "4 channel - Pockels cell driver - OUT0-X1  OUT2-X2 - OUT3-X3  OUT4-X4"
-        ]
-
-        for text_value in preset_texts:
-            preset_label = QLabel(text_value)
-            preset_label.setAlignment(
-                Qt.AlignCenter
-            )
-            preset_label.setWordWrap(True)
-            preset_label.setMinimumHeight(42)
-            preset_label.setStyleSheet("""
-                QLabel {
-                    background: #f7fafc;
-                    border: 1px solid #b9cddd;
-                    border-radius: 4px;
-                    color: #173f67;
-                    font-size: 10px;
-                    font-weight: 600;
-                    padding: 6px 8px;
-                }
-            """)
-            preset_label.setSizePolicy(
-                QSizePolicy.Expanding,
-                QSizePolicy.Expanding
-            )
-            device_layout.addWidget(
-                preset_label,
-                1
-            )
-
-        set_preset = QPushButton(
-            "Set"
-        )
-        set_preset.setObjectName(
-            "SmallBtn"
-        )
-        set_preset.setFixedWidth(
-            45
-        )
-        set_preset.setFixedHeight(
-            27
-        )
-        set_preset.setStyleSheet("""
-            QPushButton#SmallBtn {
-                font-size: 10px;
-                padding: 2px 5px;
-                min-height: 23px;
-            }
-        """)
-        set_preset.clicked.connect(
-            lambda:
-            self.set_status(
-                "Device preset selected"
-            )
-        )
-
-        device_layout.addWidget(
-            set_preset
-        )
-
-        self.other_stack.addWidget(
-            device_page
-        )
-
-        # ============================================================
-        # PAGE 4 — SOUND
-        # ============================================================
-
-        sound_page = QWidget()
-
-        sound_layout = QHBoxLayout(
-            sound_page
-        )
-
-        sound_layout.setContentsMargins(6, 3, 6, 3)
-
-        sound_layout.setSpacing(
-            12
-        )
-
-        sound_layout.addWidget(
-            label(
-                "Sound",
-                None,
-                bold=True,
-                color=DEEP
-            )
-        )
-
-        self.sound_enable = QCheckBox(
-            "Enable sound"
-        )
-
-        self.sound_enable.setChecked(
-            True
-        )
-
-        sound_layout.addWidget(
-            self.sound_enable
-        )
-
-        sound_layout.addWidget(
-            label(
-                "Volume:",
-                "FieldLabel"
-            )
-        )
-
-        self.sound_volume = QSpinBox()
-
-        self.sound_volume.setRange(
-            0,
-            100
-        )
-
-        self.sound_volume.setValue(
-            70
-        )
-
-        self.sound_volume.setSuffix(
-            " %"
-        )
-
-        sound_layout.addWidget(
-            self.sound_volume
-        )
-
-        sound_layout.addStretch()
-
-        self.other_stack.addWidget(
-            sound_page
-        )
-
-        # ============================================================
-        # PAGE 5 — INFO
-        # ============================================================
-
-        info_page = QWidget()
-
-        info_layout = QHBoxLayout(
-            info_page
-        )
-
-        info_layout.setContentsMargins(6, 3, 6, 3)
-
-        info_layout.setSpacing(
-            25
-        )
-
-        info_layout.addWidget(
-            label(
-                "TG10 Timing Generator",
-                None,
-                bold=True,
-                color=DEEP
-            )
-        )
-
-        info_layout.addWidget(
-            label(
-                "C-DAC TG10 Control GUI"
-            )
-        )
-
-        info_layout.addWidget(
-            label(
-                "GUI Version: 1.0"
-            )
-        )
-
-        info_layout.addWidget(
-            label(
-                "Hardware: EKSMA Optics TG10"
-            )
-        )
-
-        info_layout.addStretch()
-
-        self.other_stack.addWidget(
-            info_page
-        )
-
-        # ============================================================
-        # ADD STACK
-        # ============================================================
-
-        body.addWidget(
-            self.other_stack,
-            1
-        )
-
-        # ============================================================
-        # BUTTON → PAGE CONNECTION
-        # ============================================================
-
-        self.other_group.idClicked.connect(
-            self.other_stack.setCurrentIndex
-        )
-
-        return frame
-
+        dialog.exec()
 
     def _force_push_trigger(self, trigger_name):
         # GUI/front-end action only. TG10 CAN protocol is proprietary and no
