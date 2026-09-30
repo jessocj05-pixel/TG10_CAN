@@ -1,13 +1,13 @@
-"""
-TG10 TIMING GENERATOR - C-DAC
-PySide6 dashboard GUI
+# """
+# TG10 TIMING GENERATOR - C-DAC
+# PySide6 dashboard GUI
 
-Run:
-    python main.py
+# Run:
+#     python main.py
 
-Requirement:
-    pip install PySide6 pyserial
-"""
+# Requirement:
+#     pip install PySide6 pyserial
+# """
 
 import sys
 import os
