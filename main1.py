@@ -1716,20 +1716,21 @@ class TG10Window(QMainWindow):
         )
 
         # ====================================================
-        # HEADER / SET
+        # SET BUTTON
         # ====================================================
 
         top_row = QHBoxLayout()
-        top_row.setContentsMargins(0, 0, 0, 2)
+        top_row.setContentsMargins(0, 0, 0, 0)
+
         top_row.addStretch()
 
         sync_set = QPushButton("Set")
         sync_set.setObjectName("SmallBtn")
-        sync_set.setFixedSize(72, 34)
+        sync_set.setFixedSize(62, 30)
         sync_set.setCursor(Qt.PointingHandCursor)
         sync_set.clicked.connect(self._set_sync_hardware)
-        top_row.addWidget(sync_set)
 
+        top_row.addWidget(sync_set)
         body.addLayout(top_row)
 
         # ====================================================
@@ -1741,9 +1742,9 @@ class TG10Window(QMainWindow):
         self.sync_mode_group = mode_group
 
         self.internal_radio = QRadioButton("Internal Clock")
-        self.single_radio = QRadioButton("External Source  (SINGLE IN)")
-        self.dual_radio = QRadioButton("External Source  (DUAL IN)")
-        self.oneshot_radio = QRadioButton("One Shot Trigger")
+        self.single_radio = QRadioButton("External Source\nSINGLE IN")
+        self.dual_radio = QRadioButton("External\nDUAL IN")
+        self.oneshot_radio = QRadioButton("One shot\ntrigger")
 
         radios = [
             self.internal_radio,
@@ -1754,15 +1755,14 @@ class TG10Window(QMainWindow):
 
         for i, radio in enumerate(radios):
             radio.setCursor(Qt.PointingHandCursor)
-            radio.setMinimumHeight(32)
-            radio.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+            radio.setMinimumHeight(30)
             mode_group.addButton(radio, i)
 
         self.internal_radio.setChecked(True)
         mode_group.idClicked.connect(self._sync_mode_selected)
 
         # ====================================================
-        # 1. INTERNAL CLOCK
+        # 1. INTERNAL BOX
         # ====================================================
 
         internal_box = QGroupBox()
@@ -1770,18 +1770,16 @@ class TG10Window(QMainWindow):
         internal_box.setMinimumHeight(58)
 
         internal_layout = QHBoxLayout(internal_box)
-        internal_layout.setContentsMargins(14, 8, 14, 8)
-        internal_layout.setSpacing(12)
+        internal_layout.setContentsMargins(10, 7, 10, 7)
+        internal_layout.setSpacing(10)
 
         internal_layout.addWidget(self.internal_radio)
-
-        internal_layout.addStretch()
 
         self.internal_freq = QLineEdit("100.000")
         self.internal_freq.setReadOnly(True)
         self.internal_freq.setAlignment(Qt.AlignCenter)
-        self.internal_freq.setFixedSize(420, 32)
-        internal_layout.addWidget(self.internal_freq)
+        self.internal_freq.setFixedHeight(28)
+        internal_layout.addWidget(self.internal_freq, 1)
 
         internal_layout.addWidget(
             label("MHz", "FieldLabel", True)
@@ -1790,26 +1788,23 @@ class TG10Window(QMainWindow):
         body.addWidget(internal_box)
 
         # ====================================================
-        # 2. EXTERNAL SINGLE IN
+        # 2. EXTERNAL SINGLE IN BOX
         # ====================================================
 
         single_box = QGroupBox()
         single_box.setObjectName("SyncBox")
-        single_box.setMinimumHeight(82)
+        single_box.setMinimumHeight(78)
 
         single_layout = QGridLayout(single_box)
-        single_layout.setContentsMargins(14, 8, 14, 8)
-        single_layout.setHorizontalSpacing(14)
-        single_layout.setVerticalSpacing(6)
+        single_layout.setContentsMargins(10, 7, 10, 7)
+        single_layout.setHorizontalSpacing(8)
+        single_layout.setVerticalSpacing(5)
 
-        # Left: mode selector
         single_layout.addWidget(
-            self.single_radio, 0, 0, 2, 1, Qt.AlignVCenter
+            self.single_radio,
+            0, 0, 2, 1,
+            Qt.AlignVCenter
         )
-
-        # Source selector
-        source_label = label("Source", "FieldLabel", True)
-        single_layout.addWidget(source_label, 0, 1)
 
         self.single_source_group = QButtonGroup(self)
         self.single_source_group.setExclusive(True)
@@ -1825,16 +1820,13 @@ class TG10Window(QMainWindow):
             self.single_source_clk_radio, 1
         )
 
-        source_row = QHBoxLayout()
-        source_row.setContentsMargins(0, 0, 0, 0)
-        source_row.setSpacing(18)
-        source_row.addWidget(self.single_source_sync_radio)
-        source_row.addWidget(self.single_source_clk_radio)
-        source_row.addStretch()
+        single_layout.addWidget(
+            self.single_source_sync_radio, 0, 1
+        )
+        single_layout.addWidget(
+            self.single_source_clk_radio, 0, 2
+        )
 
-        single_layout.addLayout(source_row, 0, 2, 1, 2)
-
-        # Rate
         single_layout.addWidget(
             label("Rate", "FieldLabel", True),
             1, 1
@@ -1843,33 +1835,34 @@ class TG10Window(QMainWindow):
         self.external_rate = QDoubleSpinBox()
         self.external_rate.setDecimals(6)
         self.external_rate.setValue(10.0)
-        self.external_rate.setFixedHeight(30)
+        self.external_rate.setFixedHeight(28)
         single_layout.addWidget(self.external_rate, 1, 2)
 
         self.single_rate_unit = combo(
             ["MHz", "kHz", "Hz"],
-            70
+            62
         )
         single_layout.addWidget(self.single_rate_unit, 1, 3)
 
         body.addWidget(single_box)
 
         # ====================================================
-        # 3. EXTERNAL DUAL IN
+        # 3. EXTERNAL DUAL IN BOX
         # ====================================================
 
         dual_box = QGroupBox()
         dual_box.setObjectName("SyncBox")
-        dual_box.setMinimumHeight(88)
+        dual_box.setMinimumHeight(78)
 
         dual_layout = QGridLayout(dual_box)
-        dual_layout.setContentsMargins(14, 8, 14, 8)
-        dual_layout.setHorizontalSpacing(14)
-        dual_layout.setVerticalSpacing(6)
+        dual_layout.setContentsMargins(10, 7, 10, 7)
+        dual_layout.setHorizontalSpacing(8)
+        dual_layout.setVerticalSpacing(5)
 
-        # Left: mode selector
         dual_layout.addWidget(
-            self.dual_radio, 0, 0, 2, 1, Qt.AlignVCenter
+            self.dual_radio,
+            0, 0, 2, 1,
+            Qt.AlignVCenter
         )
 
         dual_layout.addWidget(
@@ -1880,12 +1873,12 @@ class TG10Window(QMainWindow):
         self.dual_sync_input = QDoubleSpinBox()
         self.dual_sync_input.setDecimals(6)
         self.dual_sync_input.setValue(1.0)
-        self.dual_sync_input.setFixedHeight(30)
+        self.dual_sync_input.setFixedHeight(28)
         dual_layout.addWidget(self.dual_sync_input, 0, 2)
 
         self.dual_sync_unit = combo(
             ["MHz", "kHz", "Hz"],
-            70
+            62
         )
         dual_layout.addWidget(self.dual_sync_unit, 0, 3)
 
@@ -1897,28 +1890,28 @@ class TG10Window(QMainWindow):
         self.dual_clk_input = QDoubleSpinBox()
         self.dual_clk_input.setDecimals(6)
         self.dual_clk_input.setValue(99.99)
-        self.dual_clk_input.setFixedHeight(30)
+        self.dual_clk_input.setFixedHeight(28)
         dual_layout.addWidget(self.dual_clk_input, 1, 2)
 
         self.dual_clk_unit = combo(
             ["MHz", "kHz", "Hz"],
-            70
+            62
         )
         dual_layout.addWidget(self.dual_clk_unit, 1, 3)
 
         body.addWidget(dual_box)
 
         # ====================================================
-        # 4. ONE SHOT TRIGGER
+        # 4. ONE SHOT / SOFTWARE / SMART BOX
         # ====================================================
 
         trigger_box = QGroupBox()
         trigger_box.setObjectName("SyncBox")
-        trigger_box.setMinimumHeight(62)
+        trigger_box.setMinimumHeight(58)
 
         trigger_layout = QHBoxLayout(trigger_box)
-        trigger_layout.setContentsMargins(14, 8, 14, 8)
-        trigger_layout.setSpacing(22)
+        trigger_layout.setContentsMargins(10, 7, 10, 7)
+        trigger_layout.setSpacing(16)
 
         trigger_layout.addWidget(self.oneshot_radio)
 
@@ -1930,7 +1923,6 @@ class TG10Window(QMainWindow):
         self.one_shot_group.addButton(self.software_trigger, 0)
         self.one_shot_group.addButton(self.smart_trigger, 1)
 
-        trigger_layout.addSpacing(20)
         trigger_layout.addWidget(self.software_trigger)
         trigger_layout.addWidget(self.smart_trigger)
         trigger_layout.addStretch()
@@ -4303,8 +4295,8 @@ class TG10Window(QMainWindow):
         try:
             # Lazy imports keep the GUI start-up independent of the hardware
             # backend. These are the existing project backend modules.
-            import Sy4000_can_control_org as can_backend
-            import readv1 as can_reader
+            import main as can_backend
+            import monitor02 as can_reader
             import monitor02 as monitor_backend
 
             self.can_backend = can_backend
