@@ -43,7 +43,7 @@ TEST01_DIR = os.path.join(
 if TEST01_DIR not in sys.path:
     sys.path.insert(0, TEST01_DIR)
 
-from PySide6.QtCore import Qt, QPointF, QRectF, QTimer, QObject, Signal, QThread
+from PySide6.QtCore import Qt, QPointF, QRectF, QTimer, QObject, Signal, QThread, QEvent
 from PySide6.QtGui import (
     QFont, QPainter, QPen, QColor, QPolygonF, QBrush, QPixmap
 )
@@ -1323,6 +1323,16 @@ class TG10Window(QMainWindow):
         self.monitor_refresh_frames = ["⟳", "↻", "⟲", "↺"]
         self.monitor_refresh_frame_index = 0
 
+        # Built-in Monitor refresh after 10 seconds of user inactivity.
+        # There is intentionally NO visible Auto option or indicator.
+        self.monitor_inactivity_timer = QTimer(self)
+        self.monitor_inactivity_timer.setSingleShot(True)
+        self.monitor_inactivity_timer.setInterval(10_000)
+        self.monitor_inactivity_timer.timeout.connect(
+            self._automatic_inactivity_refresh
+        )
+        self._monitor_inactivity_refresh_enabled = False
+
         self.sync_mode = "Internal"
         self.frequency_mode = "Frequency"
         self.current_frequency_hz = 1_000_000.0
@@ -1353,6 +1363,12 @@ class TG10Window(QMainWindow):
         main.addWidget(self.navigation())
         main.addWidget(self.dashboard(), 1)
         main.addWidget(self.status_bar())
+
+        # Watch real user interaction across the whole GUI so that any
+        # meaningful interaction restarts the invisible 10-second timer.
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
 
     # ========================================================
     # HEADER
@@ -1700,21 +1716,20 @@ class TG10Window(QMainWindow):
         )
 
         # ====================================================
-        # SET BUTTON
+        # HEADER / SET
         # ====================================================
 
         top_row = QHBoxLayout()
-        top_row.setContentsMargins(0, 0, 0, 0)
-
+        top_row.setContentsMargins(0, 0, 0, 2)
         top_row.addStretch()
 
         sync_set = QPushButton("Set")
         sync_set.setObjectName("SmallBtn")
-        sync_set.setFixedSize(62, 30)
+        sync_set.setFixedSize(72, 34)
         sync_set.setCursor(Qt.PointingHandCursor)
         sync_set.clicked.connect(self._set_sync_hardware)
-
         top_row.addWidget(sync_set)
+
         body.addLayout(top_row)
 
         # ====================================================
@@ -1725,10 +1740,10 @@ class TG10Window(QMainWindow):
         mode_group.setExclusive(True)
         self.sync_mode_group = mode_group
 
-        self.internal_radio = QRadioButton("Internal")
-        self.single_radio = QRadioButton("External\nSINGLE IN")
-        self.dual_radio = QRadioButton("External\nDUAL IN")
-        self.oneshot_radio = QRadioButton("One shot\ntrigger")
+        self.internal_radio = QRadioButton("Internal Clock")
+        self.single_radio = QRadioButton("External Source  (SINGLE IN)")
+        self.dual_radio = QRadioButton("External Source  (DUAL IN)")
+        self.oneshot_radio = QRadioButton("One Shot Trigger")
 
         radios = [
             self.internal_radio,
@@ -1739,33 +1754,34 @@ class TG10Window(QMainWindow):
 
         for i, radio in enumerate(radios):
             radio.setCursor(Qt.PointingHandCursor)
-            radio.setMinimumHeight(30)
+            radio.setMinimumHeight(32)
+            radio.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
             mode_group.addButton(radio, i)
 
         self.internal_radio.setChecked(True)
         mode_group.idClicked.connect(self._sync_mode_selected)
 
         # ====================================================
-        # 1. INTERNAL BOX
+        # 1. INTERNAL CLOCK
         # ====================================================
 
         internal_box = QGroupBox()
         internal_box.setObjectName("SyncBox")
+        internal_box.setMinimumHeight(58)
 
         internal_layout = QHBoxLayout(internal_box)
-        internal_layout.setContentsMargins(10, 7, 10, 7)
-        internal_layout.setSpacing(10)
+        internal_layout.setContentsMargins(14, 8, 14, 8)
+        internal_layout.setSpacing(12)
 
         internal_layout.addWidget(self.internal_radio)
-        internal_layout.addWidget(
-            label("Clock", "FieldLabel", True)
-        )
+
+        internal_layout.addStretch()
 
         self.internal_freq = QLineEdit("100.000")
         self.internal_freq.setReadOnly(True)
         self.internal_freq.setAlignment(Qt.AlignCenter)
-        self.internal_freq.setFixedHeight(28)
-        internal_layout.addWidget(self.internal_freq, 1)
+        self.internal_freq.setFixedSize(420, 32)
+        internal_layout.addWidget(self.internal_freq)
 
         internal_layout.addWidget(
             label("MHz", "FieldLabel", True)
@@ -1774,22 +1790,26 @@ class TG10Window(QMainWindow):
         body.addWidget(internal_box)
 
         # ====================================================
-        # 2. EXTERNAL SINGLE IN BOX
+        # 2. EXTERNAL SINGLE IN
         # ====================================================
 
         single_box = QGroupBox()
         single_box.setObjectName("SyncBox")
+        single_box.setMinimumHeight(82)
 
         single_layout = QGridLayout(single_box)
-        single_layout.setContentsMargins(10, 7, 10, 7)
-        single_layout.setHorizontalSpacing(8)
-        single_layout.setVerticalSpacing(5)
+        single_layout.setContentsMargins(14, 8, 14, 8)
+        single_layout.setHorizontalSpacing(14)
+        single_layout.setVerticalSpacing(6)
 
+        # Left: mode selector
         single_layout.addWidget(
-            self.single_radio,
-            0, 0, 2, 1,
-            Qt.AlignVCenter
+            self.single_radio, 0, 0, 2, 1, Qt.AlignVCenter
         )
+
+        # Source selector
+        source_label = label("Source", "FieldLabel", True)
+        single_layout.addWidget(source_label, 0, 1)
 
         self.single_source_group = QButtonGroup(self)
         self.single_source_group.setExclusive(True)
@@ -1805,13 +1825,16 @@ class TG10Window(QMainWindow):
             self.single_source_clk_radio, 1
         )
 
-        single_layout.addWidget(
-            self.single_source_sync_radio, 0, 1
-        )
-        single_layout.addWidget(
-            self.single_source_clk_radio, 0, 2
-        )
+        source_row = QHBoxLayout()
+        source_row.setContentsMargins(0, 0, 0, 0)
+        source_row.setSpacing(18)
+        source_row.addWidget(self.single_source_sync_radio)
+        source_row.addWidget(self.single_source_clk_radio)
+        source_row.addStretch()
 
+        single_layout.addLayout(source_row, 0, 2, 1, 2)
+
+        # Rate
         single_layout.addWidget(
             label("Rate", "FieldLabel", True),
             1, 1
@@ -1820,33 +1843,33 @@ class TG10Window(QMainWindow):
         self.external_rate = QDoubleSpinBox()
         self.external_rate.setDecimals(6)
         self.external_rate.setValue(10.0)
-        self.external_rate.setFixedHeight(28)
+        self.external_rate.setFixedHeight(30)
         single_layout.addWidget(self.external_rate, 1, 2)
 
         self.single_rate_unit = combo(
             ["MHz", "kHz", "Hz"],
-            62
+            70
         )
         single_layout.addWidget(self.single_rate_unit, 1, 3)
 
         body.addWidget(single_box)
 
         # ====================================================
-        # 3. EXTERNAL DUAL IN BOX
+        # 3. EXTERNAL DUAL IN
         # ====================================================
 
         dual_box = QGroupBox()
         dual_box.setObjectName("SyncBox")
+        dual_box.setMinimumHeight(88)
 
         dual_layout = QGridLayout(dual_box)
-        dual_layout.setContentsMargins(10, 7, 10, 7)
-        dual_layout.setHorizontalSpacing(8)
-        dual_layout.setVerticalSpacing(5)
+        dual_layout.setContentsMargins(14, 8, 14, 8)
+        dual_layout.setHorizontalSpacing(14)
+        dual_layout.setVerticalSpacing(6)
 
+        # Left: mode selector
         dual_layout.addWidget(
-            self.dual_radio,
-            0, 0, 2, 1,
-            Qt.AlignVCenter
+            self.dual_radio, 0, 0, 2, 1, Qt.AlignVCenter
         )
 
         dual_layout.addWidget(
@@ -1857,12 +1880,12 @@ class TG10Window(QMainWindow):
         self.dual_sync_input = QDoubleSpinBox()
         self.dual_sync_input.setDecimals(6)
         self.dual_sync_input.setValue(1.0)
-        self.dual_sync_input.setFixedHeight(28)
+        self.dual_sync_input.setFixedHeight(30)
         dual_layout.addWidget(self.dual_sync_input, 0, 2)
 
         self.dual_sync_unit = combo(
             ["MHz", "kHz", "Hz"],
-            62
+            70
         )
         dual_layout.addWidget(self.dual_sync_unit, 0, 3)
 
@@ -1874,38 +1897,40 @@ class TG10Window(QMainWindow):
         self.dual_clk_input = QDoubleSpinBox()
         self.dual_clk_input.setDecimals(6)
         self.dual_clk_input.setValue(99.99)
-        self.dual_clk_input.setFixedHeight(28)
+        self.dual_clk_input.setFixedHeight(30)
         dual_layout.addWidget(self.dual_clk_input, 1, 2)
 
         self.dual_clk_unit = combo(
             ["MHz", "kHz", "Hz"],
-            62
+            70
         )
         dual_layout.addWidget(self.dual_clk_unit, 1, 3)
 
         body.addWidget(dual_box)
 
         # ====================================================
-        # 4. ONE SHOT / SOFTWARE / SMART BOX
+        # 4. ONE SHOT TRIGGER
         # ====================================================
 
         trigger_box = QGroupBox()
         trigger_box.setObjectName("SyncBox")
+        trigger_box.setMinimumHeight(62)
 
         trigger_layout = QHBoxLayout(trigger_box)
-        trigger_layout.setContentsMargins(10, 7, 10, 7)
-        trigger_layout.setSpacing(16)
+        trigger_layout.setContentsMargins(14, 8, 14, 8)
+        trigger_layout.setSpacing(22)
 
         trigger_layout.addWidget(self.oneshot_radio)
 
-        self.software_trigger = QRadioButton("Software\ntrigger")
-        self.smart_trigger = QRadioButton("Smart\ntrigger")
+        self.software_trigger = QRadioButton("Software")
+        self.smart_trigger = QRadioButton("Smart")
 
         self.one_shot_group = QButtonGroup(self)
         self.one_shot_group.setExclusive(True)
         self.one_shot_group.addButton(self.software_trigger, 0)
         self.one_shot_group.addButton(self.smart_trigger, 1)
 
+        trigger_layout.addSpacing(20)
         trigger_layout.addWidget(self.software_trigger)
         trigger_layout.addWidget(self.smart_trigger)
         trigger_layout.addStretch()
@@ -3660,6 +3685,85 @@ class TG10Window(QMainWindow):
 
         return "Monitor refreshed from TG10 hardware"
 
+    # ========================================================
+    # BUILT-IN 10-SECOND INACTIVITY MONITOR REFRESH
+    # ========================================================
+
+    def _reset_monitor_inactivity_timer(self):
+        """Restart the invisible 10-second user-inactivity countdown."""
+        if not self.connection_state or self.serial_connection is None:
+            self.monitor_inactivity_timer.stop()
+            self._monitor_inactivity_refresh_enabled = False
+            return
+
+        self._monitor_inactivity_refresh_enabled = True
+        self.monitor_inactivity_timer.start()
+
+    def _start_monitor_inactivity_refresh(self):
+        """Start the invisible inactivity refresh countdown after connection."""
+        if not self.connection_state or self.serial_connection is None:
+            self.monitor_inactivity_timer.stop()
+            self._monitor_inactivity_refresh_enabled = False
+            return
+
+        self._monitor_inactivity_refresh_enabled = True
+        self.monitor_inactivity_timer.start()
+
+    def _stop_monitor_inactivity_refresh(self):
+        """Stop automatic inactivity refresh when TG10 is disconnected."""
+        self.monitor_inactivity_timer.stop()
+        self._monitor_inactivity_refresh_enabled = False
+
+    def _automatic_inactivity_refresh(self):
+        """
+        Refresh Monitor when the GUI has been unused for 10 seconds.
+
+        This is completely invisible to the user. The existing Monitor
+        worker performs the real hardware read; no fake delay or duplicate
+        hardware-read path is created.
+
+        The inactivity countdown is stopped while the refresh is running and
+        is started again only after the real worker finishes. Therefore the
+        next automatic refresh is another full 10 seconds after the last
+        user activity / completed refresh cycle.
+        """
+        if not self.connection_state or self.serial_connection is None:
+            self._stop_monitor_inactivity_refresh()
+            return
+
+        # Do not keep a second countdown running while the real hardware
+        # worker is active.
+        self.monitor_inactivity_timer.stop()
+
+        # _refresh_monitor_hardware() already prevents overlapping reads.
+        self._refresh_monitor_hardware()
+
+    def eventFilter(self, watched, event):
+        """
+        Reset the invisible 10-second inactivity countdown whenever the user
+        actually interacts with this GUI.
+
+        This covers normal GUI activity such as:
+        - mouse movement/clicks
+        - keyboard input
+        - mouse-wheel interaction
+
+        Programmatic updates from the Monitor worker do not generate these
+        user-input events, so they do not keep postponing the refresh.
+        """
+        if self.connection_state and self.serial_connection is not None:
+            user_events = {
+                QEvent.MouseMove,
+                QEvent.MouseButtonPress,
+                QEvent.KeyPress,
+                QEvent.Wheel,
+            }
+
+            if event.type() in user_events:
+                self._reset_monitor_inactivity_timer()
+
+        return super().eventFilter(watched, event)
+
     def _refresh_monitor_hardware(self):
         """
         Start the existing Monitor hardware read in a worker thread.
@@ -3766,6 +3870,18 @@ class TG10Window(QMainWindow):
 
         if thread is not None:
             thread.deleteLater()
+
+        # Start a fresh 10-second inactivity window only after the real
+        # hardware read has completed. If the user interacted while the
+        # worker was running, eventFilter will already have restarted the
+        # timer, so do not overwrite that newer countdown.
+        if (
+            self.connection_state
+            and self.serial_connection is not None
+            and self.monitor_inactivity_timer is not None
+            and not self.monitor_inactivity_timer.isActive()
+        ):
+            self.monitor_inactivity_timer.start()
 
     def _update_monitor_values(self):
         """
@@ -4144,6 +4260,10 @@ class TG10Window(QMainWindow):
 
     def _close_can_connection(self):
         """Close the current USB-CAN serial connection, if one exists."""
+
+        # Stop the invisible inactivity refresh immediately when disconnected.
+        self._stop_monitor_inactivity_refresh()
+
         if self.serial_connection is not None:
             try:
                 if self.serial_connection.is_open:
@@ -4220,6 +4340,11 @@ class TG10Window(QMainWindow):
             self.set_status(
                 f"Connected to TG10 on {port} | Read 0x52 = 0x{config_value:02X}"
             )
+
+            # Start the invisible 10-second inactivity countdown.
+            # No immediate automatic read is performed here; the first
+            # automatic read occurs only after 10 seconds without user input.
+            self._start_monitor_inactivity_refresh()
 
             return True
 
@@ -4333,6 +4458,12 @@ class TG10Window(QMainWindow):
 
     def closeEvent(self, event):
         """Close the serial port cleanly when the GUI exits."""
+        app = QApplication.instance()
+        if app is not None:
+            app.removeEventFilter(self)
+
+        self._stop_monitor_inactivity_refresh()
+
         if (
             self.monitor_refresh_thread is not None
             and self.monitor_refresh_thread.isRunning()
