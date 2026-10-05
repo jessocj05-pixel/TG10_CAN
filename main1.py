@@ -973,16 +973,38 @@ class COMDialog(QDialog):
 
 class DelayDialog(QDialog):
 
+    # --------------------------------------------------------
+    # Time-unit conversion
+    # --------------------------------------------------------
+
+    UNIT_TO_SECONDS = {
+        "ps": 1e-12,
+        "ns": 1e-9,
+        "µs": 1e-6,
+        "ms": 1e-3,
+        "s": 1.0
+    }
+
     def __init__(self, parent=None):
 
         super().__init__(parent)
 
+        self.parent_window = parent
+
         self.setWindowTitle("TG10 Delay Presets")
         self.setFixedSize(700, 450)
+
+        # ====================================================
+        # ROOT
+        # ====================================================
 
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 14, 14, 14)
         root.setSpacing(8)
+
+        # ====================================================
+        # TITLE
+        # ====================================================
 
         root.addWidget(
             label(
@@ -993,10 +1015,52 @@ class DelayDialog(QDialog):
             )
         )
 
+        # ====================================================
+        # PAGE BUTTONS
+        # ====================================================
+
         tabs = QHBoxLayout()
-        tabs.setSpacing(5)
+        tabs.setContentsMargins(0, 0, 0, 0)
+        tabs.setSpacing(6)
+
+        self.page_buttons = []
+
+        delay_page_button = QPushButton("Delay presets")
+        delay_page_button.setCheckable(True)
+        delay_page_button.setChecked(True)
+
+        post_delay_page_button = QPushButton("Post-delay")
+        post_delay_page_button.setCheckable(True)
+
+        self.page_buttons = [
+            delay_page_button,
+            post_delay_page_button
+        ]
+
+        delay_page_button.setSizePolicy(
+            QSizePolicy.Expanding,
+            QSizePolicy.Fixed
+        )
+
+        post_delay_page_button.setSizePolicy(
+            QSizePolicy.Expanding,
+            QSizePolicy.Fixed
+        )
+
+        delay_page_button.setFixedHeight(45)
+        post_delay_page_button.setFixedHeight(45)
+
+        tabs.addWidget(delay_page_button)
+        tabs.addWidget(post_delay_page_button)
+
+        root.addLayout(tabs)
+
+        # ====================================================
+        # STACK
+        # ====================================================
 
         self.stack = QWidget()
+
         self.stack_layout = QVBoxLayout(self.stack)
         self.stack_layout.setContentsMargins(0, 0, 0, 0)
         self.stack_layout.setSpacing(0)
@@ -1004,20 +1068,24 @@ class DelayDialog(QDialog):
 
         pages = []
 
-        # ----------------------------------------------------
-        # DELAY PRESETS
-        # ----------------------------------------------------
+        # ====================================================
+        # DELAY PRESETS PAGE
+        # ====================================================
 
         page1 = QWidget()
 
         page1_layout = QVBoxLayout(page1)
         page1_layout.setContentsMargins(0, 0, 0, 0)
-        page1_layout.setSpacing(0)
+        page1_layout.setSpacing(6)
 
         grid = QGridLayout()
         grid.setContentsMargins(0, 0, 0, 0)
         grid.setHorizontalSpacing(8)
         grid.setVerticalSpacing(5)
+
+        # ----------------------------------------------------
+        # Headers
+        # ----------------------------------------------------
 
         grid.addWidget(
             label("Preset", "FieldLabel", True),
@@ -1030,6 +1098,11 @@ class DelayDialog(QDialog):
         )
 
         grid.addWidget(
+            label("Unit", "FieldLabel", True),
+            0, 2
+        )
+
+        grid.addWidget(
             label("Preset", "FieldLabel", True),
             0, 3
         )
@@ -1039,161 +1112,687 @@ class DelayDialog(QDialog):
             0, 4
         )
 
+        grid.addWidget(
+            label("Unit", "FieldLabel", True),
+            0, 5
+        )
+
+        # ----------------------------------------------------
+        # Delay widgets
+        # ----------------------------------------------------
+
+        self.delay_fields = {}
+        self.delay_units = {}
+
+        # ====================================================
+        # DEL0–DEL3 = FINE
+        # ====================================================
+
         for i in range(4):
 
-            a = QDoubleSpinBox()
-            a.setRange(0, 150_000_000)
-            a.setDecimals(3)
-            a.setSuffix(" ns")
+            field = QDoubleSpinBox()
 
-            b = QDoubleSpinBox()
-            b.setRange(0, 150_000_000)
-            b.setDecimals(3)
-            b.setSuffix(" ns")
-
-            grid.addWidget(
-                label(f"DEL{i}", "FieldLabel"),
-                i + 1, 0
+            field.setRange(
+                0.025,
+                150_000_000
             )
 
+            field.setDecimals(3)
+
+            unit = QComboBox()
+
+            unit.addItems([
+                "ps",
+                "ns",
+                "µs",
+                "ms",
+                "s"
+            ])
+
+            unit.setCurrentText("ns")
+
+            self.delay_fields[i] = field
+            self.delay_units[i] = unit
+
+            # Label
             grid.addWidget(
-                a,
-                i + 1, 1, 1, 2
+                label(
+                    f"DEL{i} (fine)",
+                    "FieldLabel"
+                ),
+                i + 1,
+                0
             )
 
+            # Value
             grid.addWidget(
-                label(f"DEL{i + 4}", "FieldLabel"),
-                i + 1, 3
+                field,
+                i + 1,
+                1
             )
 
+            # Unit
             grid.addWidget(
-                b,
-                i + 1, 4, 1, 2
+                unit,
+                i + 1,
+                2
             )
+
+        # ====================================================
+        # DEL4–DEL7
+        # ====================================================
+
+        for i in range(4, 8):
+
+            field = QDoubleSpinBox()
+
+            field.setRange(
+                0.025,
+                150_000_000
+            )
+
+            field.setDecimals(3)
+
+            unit = QComboBox()
+
+            unit.addItems([
+                "ps",
+                "ns",
+                "µs",
+                "ms",
+                "s"
+            ])
+
+            unit.setCurrentText("ns")
+
+            self.delay_fields[i] = field
+            self.delay_units[i] = unit
+
+            # ------------------------------------------------
+            # DEL4 = fine*
+            # DEL5–DEL7 = coarse
+            # ------------------------------------------------
+
+            if i == 4:
+
+                preset_name = "DEL4 (fine*)"
+
+            else:
+
+                preset_name = f"DEL{i} (coarse)"
+
+            # Label
+            grid.addWidget(
+                label(
+                    preset_name,
+                    "FieldLabel"
+                ),
+                (i - 4) + 1,
+                3
+            )
+
+            # Value
+            grid.addWidget(
+                field,
+                (i - 4) + 1,
+                4
+            )
+
+            # Unit
+            grid.addWidget(
+                unit,
+                (i - 4) + 1,
+                5
+            )
+
+        # ====================================================
+        # RANGE
+        # ====================================================
 
         grid.addWidget(
-            label("Range: 0 … 150 ms", "InfoBox"),
-            5, 0, 1, 6
+            label(
+                "Range: 25 ps … 150 ms",
+                "InfoBox"
+            ),
+            5,
+            0,
+            1,
+            6
         )
 
-        # Keep the Delay Presets content at the top of the page.
-        # Any unused vertical space stays below the content.
         page1_layout.addLayout(grid)
-
-        page1.setSizePolicy(
-            QSizePolicy.Preferred,
-            QSizePolicy.Maximum
-        )
 
         pages.append(page1)
 
-        # ----------------------------------------------------
-        # POST DELAY
-        # ----------------------------------------------------
+        # ====================================================
+        # POST-DELAY PAGE
+        # ====================================================
 
         page2 = QWidget()
 
         page2_layout = QVBoxLayout(page2)
         page2_layout.setContentsMargins(0, 0, 0, 0)
-        page2_layout.setSpacing(0)
+        page2_layout.setSpacing(6)
 
         grid2 = QGridLayout()
-        grid2.setContentsMargins(4, 8, 4, 4)
-        grid2.setHorizontalSpacing(10)
-        grid2.setVerticalSpacing(6)
+        grid2.setContentsMargins(0, 0, 0, 0)
+        grid2.setHorizontalSpacing(8)
+        grid2.setVerticalSpacing(5)
+
+        # ----------------------------------------------------
+        # Headers
+        # ----------------------------------------------------
+
+        grid2.addWidget(
+            label("Preset", "FieldLabel", True),
+            0, 0
+        )
+
+        grid2.addWidget(
+            label("Value", "FieldLabel", True),
+            0, 1
+        )
+
+        grid2.addWidget(
+            label("Unit", "FieldLabel", True),
+            0, 2
+        )
+
+        # ----------------------------------------------------
+        # Post-delay widgets
+        # ----------------------------------------------------
+
+        self.post_delay_fields = {}
+        self.post_delay_units = {}
+
+        # ====================================================
+        # POST DEL0–DEL7
+        # ====================================================
 
         for i in range(8):
 
-            value = QDoubleSpinBox()
-            value.setRange(0, 150_000_000)
-            value.setDecimals(3)
-            value.setSuffix(" ns")
+            field = QDoubleSpinBox()
+
+            # Keep the displayed range broad.
+            # Actual hardware minimum is validated
+            # after unit conversion.
+            field.setRange(
+                0.001,
+                150_000_000
+            )
+
+            field.setDecimals(3)
+
+            unit = QComboBox()
+
+            unit.addItems([
+                "ps",
+                "ns",
+                "µs",
+                "ms",
+                "s"
+            ])
+
+            unit.setCurrentText("ns")
+
+            self.post_delay_fields[i] = field
+            self.post_delay_units[i] = unit
 
             grid2.addWidget(
-                label(f"post DEL{i}", "FieldLabel"),
-                i, 0
+                label(
+                    f"post DEL{i}",
+                    "FieldLabel"
+                ),
+                i + 1,
+                0
             )
 
             grid2.addWidget(
-                value,
-                i, 1
+                field,
+                i + 1,
+                1
             )
 
-        # Keep the Post-delay content at the top of the page.
-        # Any unused vertical space stays below the content.
-        page2_layout.addLayout(grid2)
+            grid2.addWidget(
+                unit,
+                i + 1,
+                2
+            )
 
-        page2.setSizePolicy(
-            QSizePolicy.Preferred,
-            QSizePolicy.Maximum
+        # ====================================================
+        # POST-DELAY RANGE
+        # ====================================================
+
+        grid2.addWidget(
+            label(
+                "Pulse width: 4 ns … 150 ms",
+                "InfoBox"
+            ),
+            9,
+            0,
+            1,
+            3
         )
+
+        page2_layout.addLayout(grid2)
 
         pages.append(page2)
 
-        # ----------------------------------------------------
-        # PAGE BUTTONS
-        # ----------------------------------------------------
-
-        names = [
-            "Delay presets",
-            "Post-delay"
-        ]
-
-        self.page_buttons = []
-
-        for i, name in enumerate(names):
-
-            b = QPushButton(name)
-            b.setObjectName("Seg")
-            b.setCheckable(True)
-            b.setChecked(i == 0)
-
-            self.page_buttons.append(b)
-
-            tabs.addWidget(b, 1)
-
-            b.clicked.connect(
-                lambda checked, index=i:
-                self.show_delay_page(index, pages)
-            )
-
-        root.addLayout(tabs)
-
-        # ----------------------------------------------------
-        # STACKED PAGES
-        # ----------------------------------------------------
+        # ====================================================
+        # ADD PAGES
+        # ====================================================
 
         for page in pages:
-            page.setVisible(False)
+
             self.stack_layout.addWidget(page)
 
-        pages[0].setVisible(True)
+        root.addWidget(
+            self.stack
+        )
+        
+        # ====================================================
+        # DELAY RESOLUTION INFORMATION
+        # ====================================================
 
-        root.addWidget(self.stack, 1)
+        delay_info = label(
+            "Fine: 25 ps resolution — DEL0–DEL3    |    "
+            "Fine*: DEL4 uses a different clock frequency    |    "
+            "Coarse: ~9.4 ns resolution — DEL5–DEL7",
+            "InfoBox"
+        )
 
-        # ----------------------------------------------------
-        # CLOSE BUTTON
-        # ----------------------------------------------------
+        delay_info.setWordWrap(True)
+        delay_info.setMinimumHeight(42)
 
-        close_button = QPushButton("Close")
-        close_button.setObjectName("SmallBtn")
-        close_button.clicked.connect(self.accept)
+        root.addWidget(delay_info)
 
-        bottom = QHBoxLayout()
-        bottom.addStretch()
-        bottom.addWidget(close_button)
+        # ====================================================
+        # SET + CLOSE BUTTONS
+        # ====================================================
 
-        root.addLayout(bottom)
+        self.set_button = QPushButton("Set")
+        self.set_button.setObjectName("PrimaryBtn")
+        self.set_button.setFixedWidth(90)
+
+        self.close_button = QPushButton("Close")
+        self.close_button.setFixedWidth(90)
+
+        self.set_button.clicked.connect(
+            self.apply_current_page
+        )
+
+        self.close_button.clicked.connect(
+            self.close
+        )
+
+        action_layout = QHBoxLayout()
+
+        action_layout.addStretch()
+
+        action_layout.addWidget(
+            self.set_button
+        )
+
+        action_layout.addWidget(
+            self.close_button
+        )
+
+        root.addLayout(
+            action_layout
+        )
+
+        # ====================================================
+        # PAGE BUTTON CONNECTIONS
+        # ====================================================
+
+        delay_page_button.clicked.connect(
+            lambda: self.show_delay_page(
+                0,
+                pages
+            )
+        )
+
+        post_delay_page_button.clicked.connect(
+            lambda: self.show_delay_page(
+                1,
+                pages
+            )
+        )
+
+        # ====================================================
+        # START WITH DELAY PAGE
+        # ====================================================
+
+        self.show_delay_page(
+            0,
+            pages
+        )
+
+    # ========================================================
+    # PAGE SWITCHING
+    # ========================================================
 
     def show_delay_page(self, index, pages):
 
         for i, page in enumerate(pages):
-            page.setVisible(i == index)
 
-            if i < len(self.page_buttons):
-                self.page_buttons[i].setChecked(i == index)
+            page.setVisible(
+                i == index
+            )
 
+        for i, button in enumerate(
+            self.page_buttons
+        ):
 
+            button.setChecked(
+                i == index
+            )
+
+            if i == index:
+
+                button.setStyleSheet("""
+                    QPushButton {
+                        background: #087fc1;
+                        color: white;
+                        border: 1px solid #087fc1;
+                        border-radius: 2px;
+                        font-weight: 600;
+                        padding: 8px 20px;
+                    }
+
+                    QPushButton:hover {
+                        background: #087fc1;
+                    }
+                """)
+
+            else:
+
+                button.setStyleSheet("""
+                    QPushButton {
+                        background: #eef3f7;
+                        color: #24445d;
+                        border: 1px solid #c5d4df;
+                        border-radius: 2px;
+                        font-weight: 500;
+                        padding: 8px 20px;
+                    }
+
+                    QPushButton:hover {
+                        background: #e4edf4;
+                    }
+                """)
+
+        # Remember currently selected page
+        self.current_page = index
+
+    # ========================================================
+    # SYSTEM CLOCK
+    # ========================================================
+
+    def get_system_clock_hz(self):
+
+        """
+        Current internal-sync configuration:
+
+            100 MHz reference × Ndiv 30 = 3 GHz
+
+        If the TG10 synchronization configuration is changed
+        to an external source, this should be replaced with
+        the actual system clock obtained from the Sync
+        configuration.
+        """
+
+        return 3_000_000_000.0
+
+    # ========================================================
+    # CONNECTION CHECK
+    # ========================================================
+
+    def check_connection(self):
+
+        parent = self.parent_window
+
+        if parent is None:
+
+            QMessageBox.warning(
+                self,
+                "Connection",
+                "TG10 main window is not available."
+            )
+
+            return False
+
+        if not getattr(
+            parent,
+            "connection_state",
+            False
+        ):
+
+            QMessageBox.warning(
+                self,
+                "TG10 Not Connected",
+                "Please connect to the TG10 before applying presets."
+            )
+
+            return False
+
+        if not getattr(
+            parent,
+            "serial_connection",
+            None
+        ):
+
+            QMessageBox.warning(
+                self,
+                "TG10 Not Connected",
+                "No active TG10 connection was found."
+            )
+
+            return False
+
+        return True
+
+    # ========================================================
+    # APPLY CURRENT PAGE
+    # ========================================================
+
+    def apply_current_page(self):
+
+        if self.current_page == 0:
+
+            self.apply_delay_presets()
+
+        else:
+
+            self.apply_post_delay_presets()
+
+    # ========================================================
+    # APPLY DELAY PRESETS
+    # ========================================================
+
+    def apply_delay_presets(self):
+
+        if not self.check_connection():
+
+            return
+
+        parent = self.parent_window
+
+        try:
+
+            f_hz = self.get_system_clock_hz()
+
+            # ------------------------------------------------
+            # DEL0–DEL7
+            # ------------------------------------------------
+
+            for ch in range(8):
+
+                field = self.delay_fields[ch]
+                unit = self.delay_units[ch]
+
+                value = field.value()
+                selected_unit = unit.currentText()
+
+                time_s = (
+                    value
+                    * self.UNIT_TO_SECONDS[
+                        selected_unit
+                    ]
+                )
+
+                # ------------------------------------------------
+                # Hardware sequence
+                # ------------------------------------------------
+
+                sequence = (
+                    parent.operations
+                    .build_delay_channel(
+                        ch,
+                        time_s,
+                        f_hz
+                    )
+                )
+
+                # ------------------------------------------------
+                # Send to TG10
+                # ------------------------------------------------
+
+                parent.can_backend.send_sequence(
+                    parent.serial_connection,
+                    sequence,
+                    label=(
+                        f"DEL{ch} = "
+                        f"{value:.3f} "
+                        f"{selected_unit}"
+                    )
+                )
+
+            QMessageBox.information(
+                self,
+                "Delay Presets",
+                "All delay presets were applied successfully."
+            )
+
+        except Exception as e:
+
+            QMessageBox.critical(
+                self,
+                "Delay Error",
+                f"Failed to apply delay presets:\n\n{e}"
+            )
+
+    # ========================================================
+    # APPLY POST-DELAY PRESETS
+    # ========================================================
+
+    def apply_post_delay_presets(self):
+
+        parent = self.parent()
+
+        if parent is None:
+            return
+
+        # ----------------------------------------------------
+        # Check connection
+        # ----------------------------------------------------
+        if not getattr(parent, "connection_state", False):
+            QMessageBox.warning(
+                self,
+                "Not Connected",
+                "Please connect to TG10 before setting Post-delay presets."
+            )
+            return
+
+        # ----------------------------------------------------
+        # Get system clock
+        # ----------------------------------------------------
+        f_hz = self.get_system_clock_hz()
+
+        # ----------------------------------------------------
+        # Apply each Post-delay channel
+        # ----------------------------------------------------
+        for ch in range(8):
+
+            field = self.post_delay_fields[ch]
+            unit = self.post_delay_units[ch]
+
+            value = field.value()
+            unit_text = unit.currentText()
+
+            # Convert GUI value to seconds
+            unit_to_seconds = {
+                "ps": 1e-12,
+                "ns": 1e-9,
+                "µs": 1e-6,
+                "ms": 1e-3,
+                "s": 1.0,
+            }
+
+            pulse_width_s = (
+                value * unit_to_seconds[unit_text]
+            )
+
+            try:
+
+                # ------------------------------------------------
+                # Calculate the REAL TG10-supported value
+                # ------------------------------------------------
+                sequence, actual_width_s = (
+                    parent.operations.build_post_delay_channel(
+                        ch,
+                        pulse_width_s,
+                        f_hz
+                    )
+                )
+
+                # ------------------------------------------------
+                # Send to TG10
+                # ------------------------------------------------
+                parent.can_backend.send_sequence(
+                    parent.serial_connection,
+                    sequence,
+                    label=f"POST DEL{ch}"
+                )
+
+                # ------------------------------------------------
+                # Convert ACTUAL programmed value back to GUI unit
+                # ------------------------------------------------
+                actual_value = (
+                    actual_width_s /
+                    unit_to_seconds[unit_text]
+                )
+
+                # ------------------------------------------------
+                # Update GUI with the REAL programmed value
+                # ------------------------------------------------
+                field.blockSignals(True)
+
+                field.setValue(
+                    actual_value
+                )
+
+                field.blockSignals(False)
+
+            except Exception as e:
+
+                QMessageBox.critical(
+                    self,
+                    "Post-delay Error",
+                    f"Failed to set post DEL{ch}:\n\n{e}"
+                )
+
+                return
+
+        # ----------------------------------------------------
+        # Success
+        # ----------------------------------------------------
+        QMessageBox.information(
+            self,
+            "Post-delay",
+            "Post-delay presets applied successfully."
+        )
+    
 # ============================================================
 # PRESET DIALOG
 # ============================================================
@@ -4290,6 +4889,7 @@ class TG10Window(QMainWindow):
             import monitor02 as can_reader
             import monitor02 as monitor_backend
             import operations02 as operations
+            import calculations02_ as calculations
 
             self.can_backend = can_backend
             self.can_reader = can_reader
@@ -4374,11 +4974,13 @@ class TG10Window(QMainWindow):
 
     def open_delay(self):
 
-        dialog = DelayDialog(
-            self
-        )
+        if not hasattr(self, "delay_dialog"):
 
-        dialog.exec()
+            self.delay_dialog = DelayDialog(
+                self
+            )
+
+        self.delay_dialog.exec()
 
     def open_presets(self):
 
