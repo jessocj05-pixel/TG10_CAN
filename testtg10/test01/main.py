@@ -48,7 +48,7 @@ def send_remote_frame(ser: serial.Serial, can_id: int, dlc: int = 0):
     ser.write(pkt)
 
 
-def read_echo(ser: serial.Serial, timeout=0.3):
+def read_response(ser: serial.Serial, timeout=0.3):
     time.sleep(timeout)
     if ser.in_waiting:
         resp = ser.read(ser.in_waiting)
