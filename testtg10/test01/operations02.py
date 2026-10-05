@@ -476,13 +476,19 @@ def build_delay_channel(
     )
 
 
-def build_post_delay_channel(
-    channel: int,
-    pulse_width_s: float,
-    f_hz: float,
-) -> Sequence:
-    pc, actual_width_s = post_delay_calc(channel, f_hz, pulse_width_s)   # arg order: channel first now; unpack the tuple
-    return seq_post_delay_channel(channel, pc)                          # pc is now the int, same as before -- rest unchanged
+def build_post_delay_channel(channel, pulse_width_s, f_hz):
+    post_count, actual_width_s = post_delay_calc(
+        channel,
+        f_hz,
+        pulse_width_s
+    )
+
+    sequence = seq_post_delay_channel(
+        channel,
+        post_count
+    )
+
+    return sequence, actual_width_s                         # pc is now the int, same as before -- rest unchanged
 
 
 # ===========================================================================
