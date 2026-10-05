@@ -29,6 +29,7 @@ TG10_CAN_DIR = os.path.abspath(
 if TG10_CAN_DIR not in sys.path:
     sys.path.insert(0, TG10_CAN_DIR)
 
+
 # ============================================================
 # TG10 TEST01 MONITOR BACKEND PATH
 # ============================================================
@@ -1714,24 +1715,15 @@ class TG10Window(QMainWindow):
             "Synchronization (Sync)",
             collapsible=False
         )
-
         # ====================================================
         # SET BUTTON
         # ====================================================
-
-        top_row = QHBoxLayout()
-        top_row.setContentsMargins(0, 0, 0, 0)
-
-        top_row.addStretch()
-
-        sync_set = QPushButton("Set")
-        sync_set.setObjectName("SmallBtn")
-        sync_set.setFixedSize(62, 30)
-        sync_set.setCursor(Qt.PointingHandCursor)
-        sync_set.clicked.connect(self._set_sync_hardware)
-
-        top_row.addWidget(sync_set)
-        body.addLayout(top_row)
+        
+        add_card_action(
+            frame,
+            callback=self._set_sync_hardware,
+            text="Set"
+        )
 
         # ====================================================
         # MAIN SYNC MODE GROUP
@@ -3124,10 +3116,9 @@ class TG10Window(QMainWindow):
 
         self.monitor_refresh_button = QPushButton("Refresh")
         self.monitor_refresh_button.setObjectName("HdrBtn")
+        self.monitor_refresh_button.setFocusPolicy(Qt.NoFocus)
         self.monitor_refresh_button.setFixedWidth(88)
-        self.monitor_refresh_button.setToolTip(
-            "Read the latest Monitor values from TG10 hardware"
-        )
+        
         self.monitor_refresh_button.clicked.connect(
             self._refresh_monitor_hardware
         )
@@ -4298,10 +4289,12 @@ class TG10Window(QMainWindow):
             import main as can_backend
             import monitor02 as can_reader
             import monitor02 as monitor_backend
+            import operations02 as operations
 
             self.can_backend = can_backend
             self.can_reader = can_reader
             self.monitor_backend = monitor_backend
+            self.operations = operations
 
             # Use the backend's existing serial settings. The COM number
             # comes ONLY from the GUI selection.
@@ -4396,45 +4389,78 @@ class TG10Window(QMainWindow):
         dialog.exec()
 
     def toggle_run(self):
+        try:
+            if not self.connection_state or self.serial_connection is None:
+                QMessageBox.warning(
+                    self,
+                    "TG10 RUN / STOP",
+                    "TG10 is not connected. Open COM and connect first."
+                )
+                return
 
-        self.running = not self.running
+            if not self.running:
+                # RUN
+                sequence = self.operations.seq_run_on()
+                label = "RUN_ON"
+            else:
+                # STOP
+                sequence = self.operations.seq_run_off()
+                label = "RUN_OFF"
 
-        if self.running:
-
-            self.run_button.setText(
-                "■  STOP"
+            # Use the existing CAN backend function.
+            self.can_backend.send_sequence(
+                self.serial_connection,
+                sequence,
+                label=label
             )
 
-            self.run_button.setStyleSheet(
-                f"""
-                QPushButton#RunBtn {{
-                    background:{RED};
-                    border:1px solid {RED};
-                    color:white;
-                    font-weight:700;
-                    min-height:40px;
-                    padding:5px 22px;
-                    border-radius:3px;
-                }}
-                """
-            )
+            # Change GUI state only after hardware command succeeds.
+            self.running = not self.running
 
-            self.set_status("RUN active")
+            if self.running:
+                # TG10 is RUNNING → show STOP in RED
+                self.run_button.setText("■  STOP")
+                self.run_button.setStyleSheet(
+                    """
+                    QPushButton#RunBtn {
+                        background:#d32f2f;
+                        border:1px solid #d32f2f;
+                        color:white;
+                        font-weight:700;
+                        min-height:40px;
+                        padding:5px 22px;
+                        border-radius:3px;
+                    }
+                    """
+                )
+                self.set_status("RUN active")
+
+            else:
+                # TG10 is STOPPED → show RUN in GREEN
+                self.run_button.setText("▶  RUN")
+                self.run_button.setStyleSheet(
+                    """
+                    QPushButton#RunBtn {
+                        background:#159447;
+                        border:1px solid #159447;
+                        color:white;
+                        font-weight:700;
+                        min-height:40px;
+                        padding:5px 22px;
+                        border-radius:3px;
+                    }
+                    """
+                )
+                self.set_status("RUN stopped")
+
             self._update_monitor_values()
 
-        else:
-
-            self.run_button.setText(
-                "▶  RUN"
+        except Exception as exc:
+            QMessageBox.critical(
+                self,
+                "TG10 RUN / STOP Failed",
+                f"Could not change RUN/STOP state:\n{exc}"
             )
-
-            self.run_button.setStyleSheet(
-                ""
-            )
-
-            self.set_status("RUN stopped")
-            self._update_monitor_values()
-
     def set_status(self, text):
 
         if self.connection_state and self.selected_com_port:
