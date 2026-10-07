@@ -129,3 +129,20 @@ hardcheck = [
     (0x6C, (2057).to_bytes(2, "little")),         # DAC2 = 2057
     (0x50, bytes([0x01])),                        # MuxDAC = 1
 ]
+
+priya = [
+    (0x10, bytes([0x00])),                        # Command = 0
+    (0x75, bytes([0x00])),                        # OscClkMux = 0
+    (0x11, bytes([0x64])),                        # OscClock = 100
+    (0x12, (30).to_bytes(4, "little")),           # Ndiv = 30
+    (0x6D, bytes([0x01])),                        # VCO = 1
+    (0x55, bytes([0x00])),                        # MuxRateClk = 0
+    (0x54, bytes([0x00])),                        # MuxStartTrg = 0
+    (0x20, (1000).to_bytes(4, "little")),         # Ratediv = 1000
+    (0x1B, (10).to_bytes(4, "little")),           # DelayCnt4 = 10
+    (0x5A, bytes([0x0B])),                        # Adly4 = 11
+    (0x1E, (12).to_bytes(4, "little")),           # DelayCnt7 = 12
+    (0x1D, (11).to_bytes(4, "little")),           # DelayCnt6 = 11
+    (0x63, bytes([0x1A])),                        # Ddly6 = 26
+    (0x5C, bytes([0x01])),                        # Adly6 = 1
+]

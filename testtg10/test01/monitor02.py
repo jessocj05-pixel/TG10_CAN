@@ -69,7 +69,6 @@ def fmt_period(p):
         return f"{p*1e3:.3f} ms"
     return f"{p:.6f} s"
 
-
 def fmt_delay(total_s: float, F: float) -> str:
     """Pick display granularity like TG10 does: full/D+A/A-only."""
     coarse_step = 28.0 / F      # ~9.33 ns
