@@ -2829,13 +2829,27 @@ class TG10Window(QMainWindow):
             )
 
         if hasattr(self, "monitor_live_clk"):
-            self.monitor_live_clk.setText(...)
+            self.monitor_live_clk.setText(
+                self._format_hz(clk)
+            )
 
         if hasattr(self, "monitor_live_sync"):
-            self.monitor_live_sync.setText(...)
+            self.monitor_live_sync.setText(
+                self._format_hz(sync)
+            )
 
         if hasattr(self, "monitor_live_note"):
-            self.monitor_live_note.setText(...)
+            self.monitor_live_note.setText(
+                f"Hardware: {display_mode}"
+                + (
+                    f" | Output: {self._format_hz(out_hz)}"
+                    if out_hz is not None else ""
+                )
+                + (
+                    f" | Ratediv: {ratediv}"
+                    if ratediv is not None else ""
+                )
+            )
 
         if hasattr(self, "dashboard_live_clk"):
             self.dashboard_live_clk.setText(self._format_hz(clk))
@@ -2860,8 +2874,7 @@ class TG10Window(QMainWindow):
 
             sequence = operations.build_internal_100mhz_from_period(
                 period_s=1.0 / 100_000_000.0,
-                
-                command_on=True
+                command_on=False
             )
 
         elif mode == "External SINGLE IN":
@@ -2880,7 +2893,7 @@ class TG10Window(QMainWindow):
                 sequence = operations.build_external_clkin_from_period(
                     period_s=period_s,
                     fext_hz=clk_in_hz,
-                    command_on=True,
+                    command_on=False,
                     include_readback=False
                 )
 
@@ -2893,14 +2906,14 @@ class TG10Window(QMainWindow):
                     self.single_rate_unit.currentText()
                 )
 
-                ratediv = calculations.calc_rate_divider(
+                ratediv = self.calculations.calc_rate_divider(
                     period_s,
                     1.0 / sync_in_hz
                 )
 
                 sequence = operations.build_external_syncin(
                     ratediv=ratediv,
-                    command_on=True
+                    command_on=False
                 )
 
             else:
@@ -2924,7 +2937,7 @@ class TG10Window(QMainWindow):
                 period_s=period_s,
                 fext_hz=clk_in_hz,
                 syncin_hz=sync_in_hz,
-                command_on=True
+                command_on=False
             )
 
         elif mode == "One shot trigger":
@@ -2932,13 +2945,13 @@ class TG10Window(QMainWindow):
             if self.software_trigger.isChecked():
 
                 sequence = operations.seq_oneshot_software(
-                    command_on=True
+                    command_on=False
                 )
 
             elif self.smart_trigger.isChecked():
 
                 sequence = operations.seq_oneshot_smart(
-                    command_on=True
+                    command_on=False
                 )
 
             else:
@@ -3033,9 +3046,20 @@ class TG10Window(QMainWindow):
             return
         source = self._single_source_name()
         unit = self.single_rate_unit.currentText()
-        ranges = ({"MHz": (10.0,100.0), "kHz": (10000.0,100000.0), "Hz": (1e7,1e8)}
-                   if source == "CLK IN" else
-                   {"MHz": (1e-5,20.0), "kHz": (0.01,20000.0), "Hz": (0.01,2e7)})
+        ranges = (
+            {
+                "MHz": (20.0, 100.0),
+                "kHz": (20000.0, 100000.0),
+                "Hz": (2e7, 1e8),
+            }
+            if source == "CLK IN"
+            else
+            {
+                "MHz": (1e-5, 20.0),
+                "kHz": (0.01, 20000.0),
+                "Hz": (0.01, 2e7),
+            }
+        )
         lo, hi = ranges[unit]
         self.external_rate.setRange(lo, hi)
         self.external_rate.setValue(min(max(self.external_rate.value(), lo), hi))
@@ -3141,6 +3165,15 @@ class TG10Window(QMainWindow):
             return float(self.current_period_s)
 
         return self._period_to_s()
+    
+    def _sync_value_to_hz(self, value, unit):
+        factor = {
+            "Hz": 1.0,
+            "kHz": 1e3,
+            "MHz": 1e6,
+        }[unit]
+
+        return float(value) * factor
     
     def _set_frequency_hz(self, hz):
         hz=max(0.01,min(20e6,float(hz)))
@@ -5153,6 +5186,7 @@ class TG10Window(QMainWindow):
             self.can_backend = can_backend
             self.can_reader = can_reader
             self.monitor_backend = monitor_backend
+            self.calculations = calculations
             self.operations = operations
             self.menu = menu
 
@@ -5198,6 +5232,8 @@ class TG10Window(QMainWindow):
             self.can_backend = None
             self.can_reader = None
             self.monitor_backend = None
+            self.calculations = None
+            self.connection_state = False
 
             self.set_status(
                 f"Connection failed on {port}"
