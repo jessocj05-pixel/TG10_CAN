@@ -80,13 +80,13 @@ def read_register(ser: serial.Serial, reg_id: int, subscribe: bool = False, wait
     code = CODE_REQ_SUBSCRIBE if subscribe else CODE_REQ
     can_id = make_id(reg_id, code=code)
     send_remote_frame(ser, can_id, dlc=0)
-    return read_echo(ser, timeout=wait)
+    return read_response(ser, timeout=wait)
 
 
 def write_register(ser: serial.Serial, reg_id: int, data: bytes, nonvolatile: bool = False):
     can_id = make_id_NV(reg_id) if nonvolatile else make_id(reg_id)
     send_frame(ser, can_id, data)
-    return read_echo(ser)
+    return read_response(ser)
 
 
 # ────────────────────────────────────────────────
