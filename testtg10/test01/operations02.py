@@ -266,7 +266,7 @@ def build_internal_100mhz_from_period(
         ndiv=cfg.n_divider,
         vco=cfg.vco2_reg,
         ratediv=ratediv,
-        command_on=command_on,
+        
     )
 
 
@@ -288,7 +288,6 @@ def build_external_clkin_from_period(
         ndiv=cfg.n_divider,
         vco=cfg.vco2_reg,
         ratediv=ratediv,
-        command_on=command_on,
         include_readback=include_readback,
     )
 
@@ -306,7 +305,6 @@ def build_external_syncin(
         ndiv=ndiv,
         vco=vco,
         ratediv=ratediv,
-        command_on=command_on,
     )
 
 from calculations02_ import calc_rate_divider
@@ -331,7 +329,6 @@ def build_external_dual_in_from_period(
         ndiv=cfg.n_divider,
         vco=cfg.vco2_reg,
         ratediv=ratediv,
-        command_on=command_on,
     )
 
 
