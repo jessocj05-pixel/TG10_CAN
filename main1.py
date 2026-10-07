@@ -22,9 +22,10 @@ import os
 #
 # Add TG10_CAN to Python's module search path so the GUI can
 # use the existing backend without copying backend files.
-TG10_CAN_DIR = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "TG10_CAN")
-)
+# TG10_CAN_DIR = os.path.abspath(
+#     os.path.join(os.path.dirname(__file__), "..", "TG10_CAN")
+# )
+TG10_CAN_DIR = os.path.dirname(os.path.abspath(__file__))
 
 if TG10_CAN_DIR not in sys.path:
     sys.path.insert(0, TG10_CAN_DIR)
