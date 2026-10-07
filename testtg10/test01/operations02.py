@@ -541,6 +541,29 @@ def seq_config_freq_div(f_div: int = 1) -> Sequence:
     ]
 
 
+
+def seq_oneshot_trigger_fire()-> Sequence:
+    return [
+        (0x70, bytes([0x01])),   # OSTrig = START
+        (0x70, bytes([0x00])),   # OSTrig = clear
+    ]
+def seq_burst_trigger_fire()-> Sequence:
+    return [
+        (0x71, bytes([0x01])),   # OSTrig = START
+        (0x71, bytes([0x00])),   # OSTrig = clear
+    ]
+def seq_latch_set_trigger_fire()-> Sequence:
+    return [
+        (0x72, bytes([0x01])),   # OSTrig = START
+        (0x72, bytes([0x00])),   # OSTrig = clear
+    ]
+
+def seq_latch_reset_trigger_fire()-> Sequence:
+    return [
+        (0x73, bytes([0x01])),   # OSTrig = START
+        (0x73, bytes([0x00])),   # OSTrig = clear
+    ]
+
 # ===========================================================================
 # 5. Output channel configuration (OUT0–OUT7)
 # ===========================================================================
