@@ -59,6 +59,11 @@ from operations02 import (
     seq_out_pret,
     seq_out_comt,
     seq_sr_block,
+    #other
+    seq_oneshot_trigger_fire,
+    seq_burst_trigger_fire,
+    seq_latch_set_trigger_fire,
+    seq_latch_reset_trigger_fire,
     # Run
     seq_run_on,
     seq_run_off,
@@ -845,30 +850,32 @@ def menu_load_preset():
 
 def menu_other():
     print("\n--- Other ---")
-    print("1) One-shot FIRE (software) – pulse once")
-    print("2) One-shot FIRE (smart) – pulse once")
-    print("3) Re-print last sequence")
-    print("4) Show current configuration")
+    print("1) One-shot Trigger Fire – pulse once")
+    print("2) Burst Trigger – pulse once")
+    print("3) Latch SET Trigger – pulse once")
+    print("4) Latch RESET Trigger – pulse once")
+    print("5) Re-print last sequence")
+    print("6) Show current configuration")
     choice = ask("choose", default="3")
 
     if choice == "1":
-        seq = [
-            (0x70, bytes([0x01])),   # OSTrig = START
-            (0x70, bytes([0x00])),   # OSTrig = clear
-        ]
-        print_sequence(seq, "one-shot FIRE (software)")
+        seq = seq_oneshot_trigger_fire()
+        print_sequence(seq, "one-shot Trigger fire")
     elif choice == "2":
-        seq = [
-            (0x70, bytes([0x01])),
-            (0x70, bytes([0x00])),
-        ]
-        print_sequence(seq, "one-shot FIRE (smart)")
+        seq = seq_burst_trigger_fire()
+        print_sequence(seq, "Burst Trigger")
     elif choice == "3":
+        seq = seq_latch_set_trigger_fire()
+        print_sequence(seq, "Latch SET Trigger")
+    elif choice == "4":
+        seq = seq_latch_reset_trigger_fire()
+        print_sequence(seq, "Latch RESET Trigger")
+    elif choice == "5":
         if state["last_seq"]:
             print_sequence(state["last_seq"], "last sequence")
         else:
             print("!! nothing stored yet")
-    elif choice == "4":
+    elif choice == "6":
         show_current_config()
     else:
         print("invalid choice")
