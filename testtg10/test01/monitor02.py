@@ -274,6 +274,7 @@ def _delay_seconds(ser, ch, F):
         t += (_rd(ser, r["d"]) - 4) / F
     if r["a"]:
         t += _rd(ser, r["a"]) * 25e-12
+        # t += _rd(ser, r["a"]) * 25.64e-12
     return max(t, 0.0)                             # clamp, avoid tiny negative float noise
 
 def _src_text(ser, name, F, cache, block, kind):

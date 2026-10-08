@@ -149,7 +149,7 @@ def seq_external_syncin(
         (0x6D, _u8(vco)),                           # VCO2 freq (0=2.5GHz, 1=3GHz)
         (0x20, _u32(ratediv)),                      # Ratediv = <user>
         (0x55, _u8(0x03)),                          # MuxRateClk = SYNCIN
-        (0x54, _u8(0x03)),                          # MuxStartTrg = SYNCIN@OPTCLK
+        (0x54, _u8(0x00)),                          # MuxStartTrg = SYNCIN@OPTCLK
     ]
     if command_on:
         seq.append((0x10, _u8(0x01)))               # Command = ON
