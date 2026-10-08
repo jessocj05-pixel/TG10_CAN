@@ -569,6 +569,24 @@ QRadioButton:hover, QCheckBox:hover {{
 QFrame#Card:hover {{
     border-color: #9dbbd2;
 }}
+
+QPushButton#TriggerBtn {{
+    background: #eef3f7;
+    border: 1px solid #c5d4df;
+    border-radius: 3px;
+    color: #24445d;
+}}
+
+QPushButton#TriggerBtn:hover {{
+    background: #e4edf4;
+    border-color: {BLUE};
+}}
+
+QPushButton#TriggerBtn:pressed {{
+    background: {BLUE};
+    border-color: {BLUE};
+    color: white;
+}}
 """
 
 
@@ -1016,6 +1034,43 @@ class DelayDialog(QDialog):
         "ms": 1e-3,
         "s": 1.0
     }
+    
+    def _update_delay_decimals(self, unit_combo, field):
+
+        unit = unit_combo.currentText()
+        field.setDecimals(self._decimals_for_unit(unit))
+            
+    def _convert_delay_unit(self, old_unit, new_unit, field):
+
+        if old_unit == new_unit:
+            return
+
+        old_factor = self.UNIT_TO_SECONDS[old_unit]
+        new_factor = self.UNIT_TO_SECONDS[new_unit]
+
+        value_s = field.value() * old_factor
+        new_value = value_s / new_factor
+
+        field.blockSignals(True)
+        field.setDecimals(self._decimals_for_unit(new_unit))
+        field.setValue(new_value)
+        field.blockSignals(False)
+
+
+    def _decimals_for_unit(self, unit):
+
+        if unit == "ps":
+            return 3
+        elif unit == "ns":
+            return 3
+        elif unit == "µs":
+            return 6
+        elif unit == "ms":
+            return 9
+        elif unit == "s":
+            return 15
+
+        return 3
 
     def __init__(self, parent=None):
 
@@ -1155,7 +1210,7 @@ class DelayDialog(QDialog):
 
         self.delay_fields = {}
         self.delay_units = {}
-
+        
         # ====================================================
         # DEL0–DEL3 = FINE
         # ====================================================
@@ -1182,6 +1237,24 @@ class DelayDialog(QDialog):
             ])
 
             unit.setCurrentText("ns")
+
+            self._update_delay_decimals(unit, field)
+
+            previous_unit = {"value": unit.currentText()}
+
+            def on_unit_changed(new_unit, u=unit, f=field, prev=previous_unit):
+
+                old_unit = prev["value"]
+
+                self._convert_delay_unit(
+                    old_unit,
+                    new_unit,
+                    f
+                )
+
+                prev["value"] = new_unit
+
+            unit.currentTextChanged.connect(on_unit_changed)
 
             self.delay_fields[i] = field
             self.delay_units[i] = unit
@@ -1219,7 +1292,7 @@ class DelayDialog(QDialog):
             field = QDoubleSpinBox()
 
             field.setRange(
-                0.025,
+                0.0,
                 150_000_000
             )
 
@@ -1236,6 +1309,24 @@ class DelayDialog(QDialog):
             ])
 
             unit.setCurrentText("ns")
+            
+            self._update_delay_decimals(unit, field)
+
+            previous_unit = {"value": unit.currentText()}
+
+            def on_unit_changed(new_unit, u=unit, f=field, prev=previous_unit):
+
+                old_unit = prev["value"]
+
+                self._convert_delay_unit(
+                    old_unit,
+                    new_unit,
+                    f
+                )
+
+                prev["value"] = new_unit
+
+            unit.currentTextChanged.connect(on_unit_changed)
 
             self.delay_fields[i] = field
             self.delay_units[i] = unit
@@ -1349,7 +1440,7 @@ class DelayDialog(QDialog):
             # Actual hardware minimum is validated
             # after unit conversion.
             field.setRange(
-                0.001,
+                0.0,
                 150_000_000
             )
 
@@ -1366,6 +1457,24 @@ class DelayDialog(QDialog):
             ])
 
             unit.setCurrentText("ns")
+            
+            self._update_delay_decimals(unit, field)
+
+            previous_unit = {"value": unit.currentText()}
+
+            def on_unit_changed(new_unit, u=unit, f=field, prev=previous_unit):
+
+                old_unit = prev["value"]
+
+                self._convert_delay_unit(
+                    old_unit,
+                    new_unit,
+                    f
+                )
+
+                prev["value"] = new_unit
+
+            unit.currentTextChanged.connect(on_unit_changed)
 
             self.post_delay_fields[i] = field
             self.post_delay_units[i] = unit
@@ -1426,17 +1535,17 @@ class DelayDialog(QDialog):
         # DELAY RESOLUTION INFORMATION
         # ====================================================
 
-        delay_info = label(
+        self.delay_info = label(
             "Fine: 25 ps resolution — DEL0–DEL3    |    "
             "Fine*: DEL4 uses a different clock frequency    |    "
             "Coarse: ~9.4 ns resolution — DEL5–DEL7",
             "InfoBox"
         )
 
-        delay_info.setWordWrap(True)
-        delay_info.setMinimumHeight(42)
+        self.delay_info.setWordWrap(True)
+        self.delay_info.setMinimumHeight(42)
 
-        root.addWidget(delay_info)
+        root.addWidget(self.delay_info)
 
         # ====================================================
         # SET + CLOSE BUTTONS
@@ -1499,6 +1608,53 @@ class DelayDialog(QDialog):
             0,
             pages
         )
+        
+        QTimer.singleShot(
+            0,
+            self.load_delay_presets_from_hardware
+        )
+        
+    def load_delay_presets_from_hardware(self):
+        if not self.check_connection():
+            return
+
+        parent = self.parent_window
+        
+        if parent.monitor_backend is None:
+            return
+
+        try:
+            f_hz = parent.get_system_clock_hz()
+
+            for ch in range(8):
+                field = self.delay_fields[ch]
+                unit = self.delay_units[ch]
+
+                selected_unit = unit.currentText()
+
+                # Read actual DELx from TG10
+                actual_time_s = parent.monitor_backend._delay_seconds(
+                    parent.serial_connection,
+                    ch,
+                    f_hz
+                )
+
+                # Convert seconds -> currently selected GUI unit
+                actual_value = (
+                    actual_time_s /
+                    self.UNIT_TO_SECONDS[selected_unit]
+                )
+
+                field.blockSignals(True)
+                field.setValue(actual_value)
+                field.blockSignals(False)
+
+        except Exception as e:
+            QMessageBox.warning(
+                self,
+                "Delay Readback",
+                f"Failed to read delay presets from TG10:\n\n{e}"
+            )
 
     # ========================================================
     # PAGE SWITCHING
@@ -1556,6 +1712,8 @@ class DelayDialog(QDialog):
 
         # Remember currently selected page
         self.current_page = index
+        # Show Fine-resolution information only on Delay Presets page
+        self.delay_info.setVisible(index == 0)
 
     
     # def get_system_clock_hz(self):
@@ -1642,7 +1800,6 @@ class DelayDialog(QDialog):
     def apply_delay_presets(self):
 
         if not self.check_connection():
-
             return
 
         parent = self.parent_window
@@ -1665,13 +1822,11 @@ class DelayDialog(QDialog):
 
                 time_s = (
                     value
-                    * self.UNIT_TO_SECONDS[
-                        selected_unit
-                    ]
+                    * self.UNIT_TO_SECONDS[selected_unit]
                 )
 
                 # ------------------------------------------------
-                # Hardware sequence
+                # Build hardware sequence
                 # ------------------------------------------------
 
                 sequence = (
@@ -1696,7 +1851,37 @@ class DelayDialog(QDialog):
                         f"{selected_unit}"
                     )
                 )
-                parent.menu.update_current_config(sequence)  #for presets 
+
+                parent.menu.update_current_config(sequence)
+
+                # ------------------------------------------------
+                # READ ACTUAL DELAY FROM TG10
+                # Use the SAME function used by Monitor
+                # ------------------------------------------------
+
+                actual_time_s = parent.monitor_backend._delay_seconds(
+                    parent.serial_connection,
+                    ch,
+                    f_hz
+                )
+
+                # ------------------------------------------------
+                # Convert actual hardware value to the
+                # currently selected GUI unit
+                # ------------------------------------------------
+
+                actual_value = (
+                    actual_time_s
+                    / self.UNIT_TO_SECONDS[selected_unit]
+                )
+
+                # ------------------------------------------------
+                # Update dialog field
+                # ------------------------------------------------
+
+                field.blockSignals(True)
+                field.setValue(actual_value)
+                field.blockSignals(False)
 
             QMessageBox.information(
                 self,
@@ -1711,7 +1896,7 @@ class DelayDialog(QDialog):
                 "Delay Error",
                 f"Failed to apply delay presets:\n\n{e}"
             )
-
+        
     # ========================================================
     # APPLY POST-DELAY PRESETS
     # ========================================================
@@ -3314,10 +3499,52 @@ class TG10Window(QMainWindow):
             if period_s <= 0:
                 raise ValueError("Period must be greater than zero.")
 
-            # 2. Get TG10 system clock
+            # 2. External SINGLE IN -> SYNC IN
+            if (
+                self.sync_mode == "External SINGLE IN"
+                and self._single_source_name() == "SYNC IN"
+            ):
+                sync_in_hz = self._sync_value_to_hz(
+                    self.external_rate.value(),
+                    self.single_rate_unit.currentText()
+                )
+
+                if sync_in_hz <= 0:
+                    raise ValueError(
+                        "Enter a valid SYNC IN frequency."
+                    )
+
+                # SYNC IN is the timing source.
+                # Desired output frequency = SYNC IN frequency / RateDiv
+                ratediv = max(
+                    1,
+                    int(round(sync_in_hz * period_s))
+                )
+
+                sequence = self.operations.build_external_syncin(
+                    ratediv=ratediv,
+                    command_on=False
+                )
+
+                self.can_backend.send_sequence(
+                    self.serial_connection,
+                    sequence,
+                    label="TG10 External SYNC IN"
+                )
+
+                self._commit_frequency_to_monitor()
+
+                self.set_status(
+                    f"External SYNC IN applied | "
+                    f"RateDiv: {ratediv}"
+                )
+                return
+
+
+            # 3. Normal clock-based modes
             system_clock_hz = self.get_system_clock_hz()
 
-            # 3. Calculate RateDiv
+            # 4. Calculate RateDiv
             ratediv = max(
                 1,
                 int(round(system_clock_hz * period_s))
@@ -5094,6 +5321,8 @@ class TG10Window(QMainWindow):
         selector.addWidget(limit_radio)
         selector.addStretch()
         root.addLayout(selector)
+        
+        
 
         # ------------------------------------------------------------
         # Push trigger
@@ -5116,7 +5345,7 @@ class TG10Window(QMainWindow):
         ]
 
         for btn in self.push_trigger_buttons:
-            btn.setObjectName("Seg")
+            btn.setObjectName("TriggerBtn")
             btn.setMinimumHeight(31)
 
         push_grid.addWidget(self.push_one_shot, 0, 0)
@@ -5410,6 +5639,12 @@ class TG10Window(QMainWindow):
 
             self.delay_dialog = DelayDialog(
                 self
+            )
+        
+        if self.connection_state:
+            QTimer.singleShot(
+                0,
+                self.delay_dialog.load_delay_presets_from_hardware
             )
 
         self.delay_dialog.exec()
