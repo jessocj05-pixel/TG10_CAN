@@ -29,6 +29,16 @@ TG10_CAN_DIR = os.path.dirname(os.path.abspath(__file__))
 
 if TG10_CAN_DIR not in sys.path:
     sys.path.insert(0, TG10_CAN_DIR)
+    
+RADIO_UNCHECKED = os.path.join(
+    TG10_CAN_DIR,
+    "radio_unchecked.svg"
+).replace("\\", "/")
+
+RADIO_CHECKED = os.path.join(
+    TG10_CAN_DIR,
+    "radio_checked.svg"
+).replace("\\", "/")
 
 
 # ============================================================
@@ -58,6 +68,19 @@ from PySide6.QtWidgets import (
     QToolButton, QDialog, QDialogButtonBox, QFormLayout,
     QGroupBox, QStackedWidget, QMessageBox
 )
+
+class TG10RadioButton(QRadioButton):
+    def __init__(self, text="", parent=None):
+        super().__init__(text, parent)
+        self.setCursor(Qt.PointingHandCursor)
+
+    # def mousePressEvent(self, event):
+    #     if self.isEnabled():
+    #         self.setChecked(not self.isChecked())
+    #     super().mousePressEvent(event)
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
 
 try:
     from serial.tools import list_ports
@@ -381,32 +404,34 @@ QDoubleSpinBox:disabled {{
     border-color: #d7dee5;
 }}
 
-QRadioButton::indicator,
-QCheckBox::indicator {{
-    width: 16px;
-    height: 16px;
+QRadioButton {{
+    color: #243b50;
+    spacing: 5px;
+    font-size: 11px;
+    font-weight: 600;
 }}
 
 QRadioButton::indicator {{
-    border: 1px solid #98aabd;
-    border-radius: 8px;
-    background: white;
+    width: 18px;
+    height: 18px;
+    border: none;
+    background: transparent;
+}}
+
+QRadioButton::indicator:unchecked {{
+    width: 18px;
+    height: 18px;
+    border: none;
+    background: transparent;
+    image: url("{RADIO_UNCHECKED}");
 }}
 
 QRadioButton::indicator:checked {{
-    border: 4px solid {BLUE};
-    background: white;
-}}
-
-QCheckBox::indicator {{
-    border: 1px solid #98aabd;
-    border-radius: 2px;
-    background: white;
-}}
-
-QCheckBox::indicator:checked {{
-    background: {BLUE};
-    border-color: {BLUE};
+    width: 18px;
+    height: 18px;
+    border: none;
+    background: transparent;
+    image: url("{RADIO_CHECKED}");
 }}
 
 QPushButton#Seg {{
@@ -497,9 +522,15 @@ QPushButton#SmallBtn {{
     font-weight: 700;
 }}
 
-QPushButton#SmallBtn:hover {{
+QPushButton#SmallBtn:hover:!pressed {{
     border-color: {BLUE};
     background: #f2f7fb;
+}}
+
+QPushButton#SmallBtn:pressed {{
+    background: {BLUE};
+    border-color: {BLUE};
+    color: white;
 }}
 
 QWidget#StatusBar {{
@@ -1526,24 +1557,21 @@ class DelayDialog(QDialog):
         # Remember currently selected page
         self.current_page = index
 
-    # ========================================================
-    # SYSTEM CLOCK
-    # ========================================================
+    
+    # def get_system_clock_hz(self):
 
-    def get_system_clock_hz(self):
+    #     """
+    #     Current internal-sync configuration:
 
-        """
-        Current internal-sync configuration:
+    #         100 MHz reference × Ndiv 30 = 3 GHz
 
-            100 MHz reference × Ndiv 30 = 3 GHz
+    #     If the TG10 synchronization configuration is changed
+    #     to an external source, this should be replaced with
+    #     the actual system clock obtained from the Sync
+    #     configuration.
+    #     """
 
-        If the TG10 synchronization configuration is changed
-        to an external source, this should be replaced with
-        the actual system clock obtained from the Sync
-        configuration.
-        """
-
-        return 3_000_000_000.0
+    #     return 3_000_000_000.0
 
     # ========================================================
     # CONNECTION CHECK
@@ -1621,7 +1649,7 @@ class DelayDialog(QDialog):
 
         try:
 
-            f_hz = self.get_system_clock_hz()
+            f_hz = parent.get_system_clock_hz()
 
             # ------------------------------------------------
             # DEL0–DEL7
@@ -1709,7 +1737,7 @@ class DelayDialog(QDialog):
         # ----------------------------------------------------
         # Get system clock
         # ----------------------------------------------------
-        f_hz = self.get_system_clock_hz()
+        f_hz = parent.get_system_clock_hz()
 
         # ----------------------------------------------------
         # Apply each Post-delay channel
@@ -1971,6 +1999,37 @@ class TG10Window(QMainWindow):
         app = QApplication.instance()
         if app is not None:
             app.installEventFilter(self)
+            
+    def get_system_clock_hz(self):
+        """
+        Return the TG10 system clock used for
+        Frequency/Period RateDiv and delay calculations.
+        """
+
+        mode = self.sync_mode
+
+        if mode == "Internal":
+            return 3_000_000_000.0
+
+        elif mode == "External SINGLE IN":
+            source = self._single_source_name()
+
+            if source == "CLK IN":
+                return 3_000_000_000.0
+
+            elif source == "SYNC IN":
+                raise ValueError(
+                    "External SINGLE IN -> SYNC IN system-clock "
+                    "calculation is not defined yet."
+                )
+
+        elif mode == "External DUAL IN":
+            return 3_000_000_000.0
+
+        elif mode == "One shot trigger":
+            return 3_000_000_000.0
+
+        return 3_000_000_000.0
 
     # ========================================================
     # HEADER
@@ -3121,12 +3180,7 @@ class TG10Window(QMainWindow):
         # formula is intentionally not shown on the instrument face.
         add_card_action(
             frame,
-            lambda: (
-                self._commit_frequency_to_monitor(),
-                self.set_status(
-                    f"Frequency set: {self.freq_value.text()} {self.freq_unit.currentText()}"
-                )
-            )
+            self._set_frequency_hardware
         )
         return frame
 
@@ -3176,6 +3230,38 @@ class TG10Window(QMainWindow):
 
         return float(value) * factor
     
+    def get_system_clock_hz(self):
+        """
+        Return the system clock used for RateDiv/delay calculations.
+        """
+        mode = self.sync_mode
+
+        if mode == "Internal":
+            return 3_000_000_000.0
+
+        elif mode == "External SINGLE IN":
+            source = self._single_source_name()
+
+            if source == "CLK IN":
+                return 3_000_000_000.0
+
+            elif source == "SYNC IN":
+                raise ValueError(
+                    "External SINGLE IN -> SYNC IN system-clock "
+                    "calculation is not defined yet."
+                )
+
+        elif mode == "External DUAL IN":
+            return 3_000_000_000.0
+
+        elif mode == "One-shot":
+            return 3_000_000_000.0
+
+        elif mode == "Smart":
+            return 3_000_000_000.0
+
+        return 3_000_000_000.0
+    
     def _set_frequency_hz(self, hz):
         hz=max(0.01,min(20e6,float(hz)))
         self.current_frequency_hz=hz; self.current_period_s=1.0/hz
@@ -3211,6 +3297,55 @@ class TG10Window(QMainWindow):
         self.committed_freq_unit = self.freq_unit.currentText()
         self.committed_period_unit = self.period_unit.currentText()
         self._update_monitor_values()
+        
+    def _set_frequency_hardware(self):
+        if not self.connection_state or self.serial_connection is None:
+            QMessageBox.warning(
+                self,
+                "Not Connected",
+                "Please connect to the TG10 first."
+            )
+            return
+
+        try:
+            # 1. Get the period selected in Frequency / Period
+            period_s = self._get_sync_output_period_s()
+
+            if period_s <= 0:
+                raise ValueError("Period must be greater than zero.")
+
+            # 2. Get TG10 system clock
+            system_clock_hz = self.get_system_clock_hz()
+
+            # 3. Calculate RateDiv
+            ratediv = max(
+                1,
+                int(round(system_clock_hz * period_s))
+            )
+
+            # 4. Create sequence for TG10 register 0x20
+            sequence = self.operations.seq_set_ratediv(ratediv)
+
+            # 5. Send RateDiv to TG10
+            self.can_backend.send_sequence(
+                self.serial_connection,
+                sequence,
+                label="TG10 Frequency / Period"
+            )
+
+            # 6. Update GUI monitor values
+            self._commit_frequency_to_monitor()
+
+            self.set_status(
+                f"Frequency / Period applied | RateDiv: {ratediv}"
+            )
+
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Frequency / Period Error",
+                str(e)
+            )
 
     def _update_frequency_range(self):
         if not hasattr(self,"freq_value"): return
