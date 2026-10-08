@@ -8,10 +8,44 @@ Run:
 Requirement:
     pip install PySide6 pyserial
 """
-
 import sys
 import os
-from PySide6.QtCore import Qt, QPointF, QRectF, QTimer
+
+# ============================================================
+# TG10 BACKEND PATH
+# ============================================================
+# TG10_Control_GUI_v1 and TG10_CAN are sibling folders:
+#
+# C-DAC IISc NQM Internship/
+# ├── TG10_Control_GUI_v1/
+# └── TG10_CAN/
+#
+# Add TG10_CAN to Python's module search path so the GUI can
+# use the existing backend without copying backend files.
+# TG10_CAN_DIR = os.path.abspath(
+#     os.path.join(os.path.dirname(__file__), "..", "TG10_CAN")
+# )
+TG10_CAN_DIR = os.path.dirname(os.path.abspath(__file__))
+
+if TG10_CAN_DIR not in sys.path:
+    sys.path.insert(0, TG10_CAN_DIR)
+
+
+# ============================================================
+# TG10 TEST01 MONITOR BACKEND PATH
+# ============================================================
+# monitor02.py uses the register transport from test01/main.py.
+# Keep this path separate from the main GUI file (main1.py).
+TEST01_DIR = os.path.join(
+    TG10_CAN_DIR,
+    "testtg10",
+    "test01"
+)
+
+if TEST01_DIR not in sys.path:
+    sys.path.insert(0, TEST01_DIR)
+
+from PySide6.QtCore import Qt, QPointF, QRectF, QTimer, QObject, Signal, QThread, QEvent
 from PySide6.QtGui import (
     QFont, QPainter, QPen, QColor, QPolygonF, QBrush, QPixmap
 )
@@ -22,7 +56,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QGridLayout, QTableWidget, QTableWidgetItem,
     QHeaderView, QAbstractItemView, QButtonGroup, QSizePolicy,
     QToolButton, QDialog, QDialogButtonBox, QFormLayout,
-    QGroupBox, QStackedWidget, QMessageBox
+    QGroupBox, QStackedWidget, QMessageBox,QProgressBar
 )
 
 try:
@@ -145,13 +179,25 @@ QLabel#AppSub {{
     font-size: 11px;
 }}
 
-QLabel#StatusPill {{
+QLabel#StatusPill,
+QPushButton#StatusPill {{
     background: white;
     border: 1px solid {LINE};
     border-radius: 3px;
     color: {RED};
     font-weight: 700;
     padding: 8px 12px;
+}}
+
+QPushButton#StatusPill:hover {{
+    border-color: {BLUE};
+    background: #f2f7fb;
+}}
+
+QPushButton#StatusPill:disabled {{
+    background: white;
+    border: 1px solid {LINE};
+    color: {RED};
 }}
 
 QPushButton#HdrBtn {{
@@ -272,6 +318,12 @@ QLabel#SmallGrey {{
     color: {GREY};
     font-size: 10.5px;
     font-weight: 600;
+}}
+
+QLabel#RefreshArrow {{
+    color: {DEEP};
+    font-size: 20px;
+    font-weight: 800;
 }}
 
 QComboBox,
@@ -622,6 +674,27 @@ def add_card_action(frame, callback=None, text="Set"):
 
 
 # ============================================================
+# MONITOR REFRESH WORKER
+# ============================================================
+
+class MonitorRefreshWorker(QObject):
+    """Run the existing TG10 Monitor backend reads off the GUI thread."""
+
+    finished = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, read_function):
+        super().__init__()
+        self.read_function = read_function
+
+    def run(self):
+        try:
+            self.finished.emit(self.read_function())
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+
+# ============================================================
 # TIMING VISUALIZATION
 # ============================================================
 
@@ -791,7 +864,7 @@ class COMDialog(QDialog):
         form.addRow("COM Port:", self.com_port)
 
         # These communication parameters are fixed for this TG10 setup.
-        self.com_bps = self._fixed_field("9600")
+        self.com_bps = self._fixed_field("2000000")
         form.addRow("COM BPS:", self.com_bps)
 
         self.can_mode = self._fixed_field("Normal")
@@ -901,16 +974,38 @@ class COMDialog(QDialog):
 
 class DelayDialog(QDialog):
 
+    # --------------------------------------------------------
+    # Time-unit conversion
+    # --------------------------------------------------------
+
+    UNIT_TO_SECONDS = {
+        "ps": 1e-12,
+        "ns": 1e-9,
+        "µs": 1e-6,
+        "ms": 1e-3,
+        "s": 1.0
+    }
+
     def __init__(self, parent=None):
 
         super().__init__(parent)
 
+        self.parent_window = parent
+
         self.setWindowTitle("TG10 Delay Presets")
-        self.resize(700, 450)
+        self.setFixedSize(700, 450)
+
+        # ====================================================
+        # ROOT
+        # ====================================================
 
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 14, 14, 14)
         root.setSpacing(8)
+
+        # ====================================================
+        # TITLE
+        # ====================================================
 
         root.addWidget(
             label(
@@ -921,133 +1016,785 @@ class DelayDialog(QDialog):
             )
         )
 
+        # ====================================================
+        # PAGE BUTTONS
+        # ====================================================
+
         tabs = QHBoxLayout()
-        tabs.setSpacing(5)
-
-        self.stack = QWidget()
-        self.stack_layout = QVBoxLayout(self.stack)
-        self.stack_layout.setContentsMargins(0, 0, 0, 0)
-
-        pages = []
-
-        # ----------------------------------------------------
-        # DELAY PRESETS
-        # ----------------------------------------------------
-
-        page1 = QWidget()
-
-        grid = QGridLayout(page1)
-        grid.setHorizontalSpacing(8)
-        grid.setVerticalSpacing(5)
-
-        grid.addWidget(label("Preset", "FieldLabel", True), 0, 0)
-        grid.addWidget(label("Value", "FieldLabel", True), 0, 1)
-        grid.addWidget(label("Preset", "FieldLabel", True), 0, 3)
-        grid.addWidget(label("Value", "FieldLabel", True), 0, 4)
-
-        for i in range(4):
-
-            a = QDoubleSpinBox()
-            a.setRange(0, 150_000_000)
-            a.setDecimals(3)
-            a.setSuffix(" ns")
-
-            b = QDoubleSpinBox()
-            b.setRange(0, 150_000_000)
-            b.setDecimals(3)
-            b.setSuffix(" ns")
-
-            grid.addWidget(
-                label(f"DEL{i}", "FieldLabel"),
-                i + 1, 0
-            )
-            grid.addWidget(a, i + 1, 1, 1, 2)
-
-            grid.addWidget(
-                label(f"DEL{i + 4}", "FieldLabel"),
-                i + 1, 3
-            )
-            grid.addWidget(b, i + 1, 4, 1, 2)
-
-        grid.addWidget(
-            label("Range: 0 … 150 ms", "InfoBox"),
-            5, 0, 1, 6
-        )
-
-        pages.append(page1)
-
-        # ----------------------------------------------------
-        # POST DELAY
-        # ----------------------------------------------------
-
-        page2 = QWidget()
-
-        grid2 = QGridLayout(page2)
-
-        for i in range(8):
-
-            value = QDoubleSpinBox()
-            value.setRange(0, 150_000_000)
-            value.setDecimals(3)
-            value.setSuffix(" ns")
-
-            grid2.addWidget(
-                label(f"post DEL{i}", "FieldLabel"),
-                i, 0
-            )
-            grid2.addWidget(value, i, 1)
-
-        pages.append(page2)
-
-        names = [
-            "Delay presets",
-            "Post-delay"
-        ]
+        tabs.setContentsMargins(0, 0, 0, 0)
+        tabs.setSpacing(6)
 
         self.page_buttons = []
 
-        for i, name in enumerate(names):
+        delay_page_button = QPushButton("Delay presets")
+        delay_page_button.setCheckable(True)
+        delay_page_button.setChecked(True)
 
-            b = QPushButton(name)
-            b.setObjectName("Seg")
-            b.setCheckable(True)
-            b.setChecked(i == 0)
+        post_delay_page_button = QPushButton("Post-delay")
+        post_delay_page_button.setCheckable(True)
 
-            self.page_buttons.append(b)
+        self.page_buttons = [
+            delay_page_button,
+            post_delay_page_button
+        ]
 
-            tabs.addWidget(b, 1)
+        delay_page_button.setSizePolicy(
+            QSizePolicy.Expanding,
+            QSizePolicy.Fixed
+        )
 
-            b.clicked.connect(
-                lambda checked, index=i:
-                self.show_delay_page(index, pages)
-            )
+        post_delay_page_button.setSizePolicy(
+            QSizePolicy.Expanding,
+            QSizePolicy.Fixed
+        )
+
+        delay_page_button.setFixedHeight(45)
+        post_delay_page_button.setFixedHeight(45)
+
+        tabs.addWidget(delay_page_button)
+        tabs.addWidget(post_delay_page_button)
 
         root.addLayout(tabs)
 
+        # ====================================================
+        # STACK
+        # ====================================================
+
+        self.stack = QWidget()
+
+        self.stack_layout = QVBoxLayout(self.stack)
+        self.stack_layout.setContentsMargins(0, 0, 0, 0)
+        self.stack_layout.setSpacing(0)
+        self.stack_layout.setAlignment(Qt.AlignTop)
+
+        pages = []
+
+        # ====================================================
+        # DELAY PRESETS PAGE
+        # ====================================================
+
+        page1 = QWidget()
+
+        page1_layout = QVBoxLayout(page1)
+        page1_layout.setContentsMargins(0, 0, 0, 0)
+        page1_layout.setSpacing(6)
+
+        grid = QGridLayout()
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(8)
+        grid.setVerticalSpacing(5)
+
+        # ----------------------------------------------------
+        # Headers
+        # ----------------------------------------------------
+
+        grid.addWidget(
+            label("Preset", "FieldLabel", True),
+            0, 0
+        )
+
+        grid.addWidget(
+            label("Value", "FieldLabel", True),
+            0, 1
+        )
+
+        grid.addWidget(
+            label("Unit", "FieldLabel", True),
+            0, 2
+        )
+
+        grid.addWidget(
+            label("Preset", "FieldLabel", True),
+            0, 3
+        )
+
+        grid.addWidget(
+            label("Value", "FieldLabel", True),
+            0, 4
+        )
+
+        grid.addWidget(
+            label("Unit", "FieldLabel", True),
+            0, 5
+        )
+
+        # ----------------------------------------------------
+        # Delay widgets
+        # ----------------------------------------------------
+
+        self.delay_fields = {}
+        self.delay_units = {}
+
+        # ====================================================
+        # DEL0–DEL3 = FINE
+        # ====================================================
+
+        for i in range(4):
+
+            field = QDoubleSpinBox()
+
+            field.setRange(
+                0.025,
+                150_000_000
+            )
+
+            field.setDecimals(3)
+
+            unit = QComboBox()
+
+            unit.addItems([
+                "ps",
+                "ns",
+                "µs",
+                "ms",
+                "s"
+            ])
+
+            unit.setCurrentText("ns")
+
+            self.delay_fields[i] = field
+            self.delay_units[i] = unit
+
+            # Label
+            grid.addWidget(
+                label(
+                    f"DEL{i} (fine)",
+                    "FieldLabel"
+                ),
+                i + 1,
+                0
+            )
+
+            # Value
+            grid.addWidget(
+                field,
+                i + 1,
+                1
+            )
+
+            # Unit
+            grid.addWidget(
+                unit,
+                i + 1,
+                2
+            )
+
+        # ====================================================
+        # DEL4–DEL7
+        # ====================================================
+
+        for i in range(4, 8):
+
+            field = QDoubleSpinBox()
+
+            field.setRange(
+                0.025,
+                150_000_000
+            )
+
+            field.setDecimals(3)
+
+            unit = QComboBox()
+
+            unit.addItems([
+                "ps",
+                "ns",
+                "µs",
+                "ms",
+                "s"
+            ])
+
+            unit.setCurrentText("ns")
+
+            self.delay_fields[i] = field
+            self.delay_units[i] = unit
+
+            # ------------------------------------------------
+            # DEL4 = fine*
+            # DEL5–DEL7 = coarse
+            # ------------------------------------------------
+
+            if i == 4:
+
+                preset_name = "DEL4 (fine*)"
+
+            else:
+
+                preset_name = f"DEL{i} (coarse)"
+
+            # Label
+            grid.addWidget(
+                label(
+                    preset_name,
+                    "FieldLabel"
+                ),
+                (i - 4) + 1,
+                3
+            )
+
+            # Value
+            grid.addWidget(
+                field,
+                (i - 4) + 1,
+                4
+            )
+
+            # Unit
+            grid.addWidget(
+                unit,
+                (i - 4) + 1,
+                5
+            )
+
+        # ====================================================
+        # RANGE
+        # ====================================================
+
+        grid.addWidget(
+            label(
+                "Range: 25 ps … 150 ms",
+                "InfoBox"
+            ),
+            5,
+            0,
+            1,
+            6
+        )
+
+        page1_layout.addLayout(grid)
+
+        pages.append(page1)
+
+        # ====================================================
+        # POST-DELAY PAGE
+        # ====================================================
+
+        page2 = QWidget()
+
+        page2_layout = QVBoxLayout(page2)
+        page2_layout.setContentsMargins(0, 0, 0, 0)
+        page2_layout.setSpacing(6)
+
+        grid2 = QGridLayout()
+        grid2.setContentsMargins(0, 0, 0, 0)
+        grid2.setHorizontalSpacing(8)
+        grid2.setVerticalSpacing(5)
+
+        # ----------------------------------------------------
+        # Headers
+        # ----------------------------------------------------
+
+        grid2.addWidget(
+            label("Preset", "FieldLabel", True),
+            0, 0
+        )
+
+        grid2.addWidget(
+            label("Value", "FieldLabel", True),
+            0, 1
+        )
+
+        grid2.addWidget(
+            label("Unit", "FieldLabel", True),
+            0, 2
+        )
+
+        # ----------------------------------------------------
+        # Post-delay widgets
+        # ----------------------------------------------------
+
+        self.post_delay_fields = {}
+        self.post_delay_units = {}
+
+        # ====================================================
+        # POST DEL0–DEL7
+        # ====================================================
+
+        for i in range(8):
+
+            field = QDoubleSpinBox()
+
+            # Keep the displayed range broad.
+            # Actual hardware minimum is validated
+            # after unit conversion.
+            field.setRange(
+                0.001,
+                150_000_000
+            )
+
+            field.setDecimals(3)
+
+            unit = QComboBox()
+
+            unit.addItems([
+                "ps",
+                "ns",
+                "µs",
+                "ms",
+                "s"
+            ])
+
+            unit.setCurrentText("ns")
+
+            self.post_delay_fields[i] = field
+            self.post_delay_units[i] = unit
+
+            grid2.addWidget(
+                label(
+                    f"post DEL{i}",
+                    "FieldLabel"
+                ),
+                i + 1,
+                0
+            )
+
+            grid2.addWidget(
+                field,
+                i + 1,
+                1
+            )
+
+            grid2.addWidget(
+                unit,
+                i + 1,
+                2
+            )
+
+        # ====================================================
+        # POST-DELAY RANGE
+        # ====================================================
+
+        grid2.addWidget(
+            label(
+                "Pulse width: 4 ns … 150 ms",
+                "InfoBox"
+            ),
+            9,
+            0,
+            1,
+            3
+        )
+
+        page2_layout.addLayout(grid2)
+
+        pages.append(page2)
+
+        # ====================================================
+        # ADD PAGES
+        # ====================================================
+
         for page in pages:
-            page.setVisible(False)
+
             self.stack_layout.addWidget(page)
 
-        pages[0].setVisible(True)
+        root.addWidget(
+            self.stack
+        )
+        
+        # ====================================================
+        # DELAY RESOLUTION INFORMATION
+        # ====================================================
 
-        root.addWidget(self.stack, 1)
+        delay_info = label(
+            "Fine: 25 ps resolution — DEL0–DEL3    |    "
+            "Fine*: DEL4 uses a different clock frequency    |    "
+            "Coarse: ~9.4 ns resolution — DEL5–DEL7",
+            "InfoBox"
+        )
 
-        close_button = QPushButton("Close")
-        close_button.setObjectName("SmallBtn")
-        close_button.clicked.connect(self.accept)
+        delay_info.setWordWrap(True)
+        delay_info.setMinimumHeight(42)
 
-        bottom = QHBoxLayout()
-        bottom.addStretch()
-        bottom.addWidget(close_button)
+        root.addWidget(delay_info)
 
-        root.addLayout(bottom)
+        # ====================================================
+        # SET + CLOSE BUTTONS
+        # ====================================================
+
+        self.set_button = QPushButton("Set")
+        self.set_button.setObjectName("PrimaryBtn")
+        self.set_button.setFixedWidth(90)
+
+        self.close_button = QPushButton("Close")
+        self.close_button.setFixedWidth(90)
+
+        self.set_button.clicked.connect(
+            self.apply_current_page
+        )
+
+        self.close_button.clicked.connect(
+            self.close
+        )
+
+        action_layout = QHBoxLayout()
+
+        action_layout.addStretch()
+
+        action_layout.addWidget(
+            self.set_button
+        )
+
+        action_layout.addWidget(
+            self.close_button
+        )
+
+        root.addLayout(
+            action_layout
+        )
+
+        # ====================================================
+        # PAGE BUTTON CONNECTIONS
+        # ====================================================
+
+        delay_page_button.clicked.connect(
+            lambda: self.show_delay_page(
+                0,
+                pages
+            )
+        )
+
+        post_delay_page_button.clicked.connect(
+            lambda: self.show_delay_page(
+                1,
+                pages
+            )
+        )
+
+        # ====================================================
+        # START WITH DELAY PAGE
+        # ====================================================
+
+        self.show_delay_page(
+            0,
+            pages
+        )
+
+    # ========================================================
+    # PAGE SWITCHING
+    # ========================================================
 
     def show_delay_page(self, index, pages):
 
         for i, page in enumerate(pages):
-            page.setVisible(i == index)
 
+            page.setVisible(
+                i == index
+            )
 
+        for i, button in enumerate(
+            self.page_buttons
+        ):
+
+            button.setChecked(
+                i == index
+            )
+
+            if i == index:
+
+                button.setStyleSheet("""
+                    QPushButton {
+                        background: #087fc1;
+                        color: white;
+                        border: 1px solid #087fc1;
+                        border-radius: 2px;
+                        font-weight: 600;
+                        padding: 8px 20px;
+                    }
+
+                    QPushButton:hover {
+                        background: #087fc1;
+                    }
+                """)
+
+            else:
+
+                button.setStyleSheet("""
+                    QPushButton {
+                        background: #eef3f7;
+                        color: #24445d;
+                        border: 1px solid #c5d4df;
+                        border-radius: 2px;
+                        font-weight: 500;
+                        padding: 8px 20px;
+                    }
+
+                    QPushButton:hover {
+                        background: #e4edf4;
+                    }
+                """)
+
+        # Remember currently selected page
+        self.current_page = index
+
+    # ========================================================
+    # SYSTEM CLOCK
+    # ========================================================
+
+    def get_system_clock_hz(self):
+
+        """
+        Current internal-sync configuration:
+
+            100 MHz reference × Ndiv 30 = 3 GHz
+
+        If the TG10 synchronization configuration is changed
+        to an external source, this should be replaced with
+        the actual system clock obtained from the Sync
+        configuration.
+        """
+
+        return 3_000_000_000.0
+
+    # ========================================================
+    # CONNECTION CHECK
+    # ========================================================
+
+    def check_connection(self):
+
+        parent = self.parent_window
+
+        if parent is None:
+
+            QMessageBox.warning(
+                self,
+                "Connection",
+                "TG10 main window is not available."
+            )
+
+            return False
+
+        if not getattr(
+            parent,
+            "connection_state",
+            False
+        ):
+
+            QMessageBox.warning(
+                self,
+                "TG10 Not Connected",
+                "Please connect to the TG10 before applying presets."
+            )
+
+            return False
+
+        if not getattr(
+            parent,
+            "serial_connection",
+            None
+        ):
+
+            QMessageBox.warning(
+                self,
+                "TG10 Not Connected",
+                "No active TG10 connection was found."
+            )
+
+            return False
+
+        return True
+
+    # ========================================================
+    # APPLY CURRENT PAGE
+    # ========================================================
+
+    def apply_current_page(self):
+
+        if self.current_page == 0:
+
+            self.apply_delay_presets()
+
+        else:
+
+            self.apply_post_delay_presets()
+
+    # ========================================================
+    # APPLY DELAY PRESETS
+    # ========================================================
+
+    def apply_delay_presets(self):
+
+        if not self.check_connection():
+
+            return
+
+        parent = self.parent_window
+
+        try:
+
+            f_hz = self.get_system_clock_hz()
+
+            # ------------------------------------------------
+            # DEL0–DEL7
+            # ------------------------------------------------
+
+            for ch in range(8):
+
+                field = self.delay_fields[ch]
+                unit = self.delay_units[ch]
+
+                value = field.value()
+                selected_unit = unit.currentText()
+
+                time_s = (
+                    value
+                    * self.UNIT_TO_SECONDS[
+                        selected_unit
+                    ]
+                )
+
+                # ------------------------------------------------
+                # Hardware sequence
+                # ------------------------------------------------
+
+                sequence = (
+                    parent.operations
+                    .build_delay_channel(
+                        ch,
+                        time_s,
+                        f_hz
+                    )
+                )
+
+                # ------------------------------------------------
+                # Send to TG10
+                # ------------------------------------------------
+
+                parent.can_backend.send_sequence(
+                    parent.serial_connection,
+                    sequence,
+                    label=(
+                        f"DEL{ch} = "
+                        f"{value:.3f} "
+                        f"{selected_unit}"
+                    )
+                )
+                parent.menu.update_current_config(sequence)  #for presets 
+
+            QMessageBox.information(
+                self,
+                "Delay Presets",
+                "All delay presets were applied successfully."
+            )
+
+        except Exception as e:
+
+            QMessageBox.critical(
+                self,
+                "Delay Error",
+                f"Failed to apply delay presets:\n\n{e}"
+            )
+
+    # ========================================================
+    # APPLY POST-DELAY PRESETS
+    # ========================================================
+
+    def apply_post_delay_presets(self):
+
+        parent = self.parent()
+
+        if parent is None:
+            return
+
+        # ----------------------------------------------------
+        # Check connection
+        # ----------------------------------------------------
+        if not getattr(parent, "connection_state", False):
+            QMessageBox.warning(
+                self,
+                "Not Connected",
+                "Please connect to TG10 before setting Post-delay presets."
+            )
+            return
+
+        # ----------------------------------------------------
+        # Get system clock
+        # ----------------------------------------------------
+        f_hz = self.get_system_clock_hz()
+
+        # ----------------------------------------------------
+        # Apply each Post-delay channel
+        # ----------------------------------------------------
+        for ch in range(8):
+
+            field = self.post_delay_fields[ch]
+            unit = self.post_delay_units[ch]
+
+            value = field.value()
+            unit_text = unit.currentText()
+
+            # Convert GUI value to seconds
+            unit_to_seconds = {
+                "ps": 1e-12,
+                "ns": 1e-9,
+                "µs": 1e-6,
+                "ms": 1e-3,
+                "s": 1.0,
+            }
+
+            pulse_width_s = (
+                value * unit_to_seconds[unit_text]
+            )
+
+            try:
+
+                # ------------------------------------------------
+                # Calculate the REAL TG10-supported value
+                # ------------------------------------------------
+                sequence, actual_width_s = (
+                    parent.operations.build_post_delay_channel(
+                        ch,
+                        pulse_width_s,
+                        f_hz
+                    )
+                )
+
+                # ------------------------------------------------
+                # Send to TG10
+                # ------------------------------------------------
+                parent.can_backend.send_sequence(
+                    parent.serial_connection,
+                    sequence,
+                    label=f"POST DEL{ch}"
+                )
+                parent.menu.update_current_config(sequence) #for presets
+                # ------------------------------------------------
+                # Convert ACTUAL programmed value back to GUI unit
+                # ------------------------------------------------
+                actual_value = (
+                    actual_width_s /
+                    unit_to_seconds[unit_text]
+                )
+
+                # ------------------------------------------------
+                # Update GUI with the REAL programmed value
+                # ------------------------------------------------
+                field.blockSignals(True)
+
+                field.setValue(
+                    actual_value
+                )
+
+                field.blockSignals(False)
+
+            except Exception as e:
+
+                QMessageBox.critical(
+                    self,
+                    "Post-delay Error",
+                    f"Failed to set post DEL{ch}:\n\n{e}"
+                )
+
+                return
+
+        # ----------------------------------------------------
+        # Success
+        # ----------------------------------------------------
+        QMessageBox.information(
+            self,
+            "Post-delay",
+            "Post-delay presets applied successfully."
+        )
+    
 # ============================================================
 # PRESET DIALOG
 # ============================================================
@@ -1167,7 +1914,26 @@ class TG10Window(QMainWindow):
         self.serial_connection = None
         self.can_backend = None
         self.can_reader = None
+        self.monitor_backend = None
         self.connection_state = False
+
+        # Monitor refresh worker state. The existing hardware backend is
+        # still used; only the blocking read is moved off the GUI thread.
+        self.monitor_refresh_thread = None
+        self.monitor_refresh_worker = None
+        self.monitor_refresh_timer = None
+        self.monitor_refresh_frames = ["⟳", "↻", "⟲", "↺"]
+        self.monitor_refresh_frame_index = 0
+
+        # Built-in Monitor refresh after 10 seconds of user inactivity.
+        # There is intentionally NO visible Auto option or indicator.
+        self.monitor_inactivity_timer = QTimer(self)
+        self.monitor_inactivity_timer.setSingleShot(True)
+        self.monitor_inactivity_timer.setInterval(10_000)
+        self.monitor_inactivity_timer.timeout.connect(
+            self._automatic_inactivity_refresh
+        )
+        self._monitor_inactivity_refresh_enabled = False
 
         self.sync_mode = "Internal"
         self.frequency_mode = "Frequency"
@@ -1199,6 +1965,12 @@ class TG10Window(QMainWindow):
         main.addWidget(self.navigation())
         main.addWidget(self.dashboard(), 1)
         main.addWidget(self.status_bar())
+
+        # Watch real user interaction across the whole GUI so that any
+        # meaningful interaction restarts the invisible 10-second timer.
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
 
     # ========================================================
     # HEADER
@@ -1272,7 +2044,9 @@ class TG10Window(QMainWindow):
 
         h.addStretch()
 
-        self.connection = QLabel(
+        # Connection status is also the disconnect control.
+        # There is intentionally no separate DISCONNECT button.
+        self.connection = QPushButton(
             "●  DISCONNECTED"
         )
 
@@ -1280,18 +2054,22 @@ class TG10Window(QMainWindow):
             "StatusPill"
         )
 
-        self.connection.setAlignment(
-            Qt.AlignCenter
+        self.connection.setCursor(Qt.PointingHandCursor)
+        self.connection.setFixedWidth(190)
+        self.connection.setToolTip(
+            "Click here to disconnect when TG10 is connected"
         )
-
-        self.connection.setFixedWidth(220)
+        self.connection.clicked.connect(
+            self._request_disconnect
+        )
+        self.connection.setEnabled(False)
 
         h.addWidget(self.connection)
 
         # COM
         com = QPushButton("COM")
         com.setObjectName("HdrBtn")
-        com.setFixedWidth(100)
+        com.setFixedWidth(90)
         com.clicked.connect(self.open_com)
 
         h.addWidget(com)
@@ -1299,7 +2077,7 @@ class TG10Window(QMainWindow):
         # Delay
         self.delay_header_btn = QPushButton("DELAY")
         self.delay_header_btn.setObjectName("HdrBtn")
-        self.delay_header_btn.setFixedWidth(100)
+        self.delay_header_btn.setFixedWidth(95)
         self.delay_header_btn.clicked.connect(self.open_delay)
 
         h.addWidget(self.delay_header_btn)
@@ -1307,7 +2085,7 @@ class TG10Window(QMainWindow):
         # Presets
         self.presets_header_btn = QPushButton("PRESETS")
         self.presets_header_btn.setObjectName("HdrBtn")
-        self.presets_header_btn.setFixedWidth(105)
+        self.presets_header_btn.setFixedWidth(100)
         self.presets_header_btn.clicked.connect(self.open_presets)
 
         h.addWidget(self.presets_header_btn)
@@ -1318,6 +2096,7 @@ class TG10Window(QMainWindow):
         self.run_button.setFixedWidth(115)
         self.run_button.clicked.connect(
             self.toggle_run
+            
         )
 
         h.addWidget(self.run_button)
@@ -1329,10 +2108,8 @@ class TG10Window(QMainWindow):
     # ========================================================
 
     def navigation(self):
-
         w = QWidget()
         w.setObjectName("TabBar")
-
         w.setMinimumHeight(38)
         w.setMaximumHeight(38)
 
@@ -1352,33 +2129,32 @@ class TG10Window(QMainWindow):
             "Output",
             "Monitor",
             "Other",
-            "Preset manager"
+            "Preset manager",
         ]
 
         for i, name in enumerate(names):
-
             b = QPushButton(name)
             b.setObjectName("Tab")
             b.setCheckable(True)
             b.setCursor(Qt.PointingHandCursor)
-
-            b.clicked.connect(
-                lambda checked, name=name: (
-                    self.highlight_section(name),
-                    self.highlight_header_buttons(name)
-                )
-            )
-
+            b.clicked.connect(lambda checked, name=name: self._navigation_clicked(name))
             if i == 0:
                 b.setChecked(True)
-
             group.addButton(b, i)
-
             h.addWidget(b)
 
         h.addStretch()
-
         return w
+
+    def _navigation_clicked(self, name):
+        """Handle dashboard navigation, including the Other popup."""
+        self.highlight_header_buttons(name)
+
+        if name == "Other":
+            self.open_other()
+            return
+
+        self.highlight_section(name)
 
     def highlight_header_buttons(self, name):
         """Highlight DELAY/PRESETS buttons in the header near COM."""
@@ -1425,72 +2201,73 @@ class TG10Window(QMainWindow):
     # ========================================================
 
     def dashboard(self):
+        """Main TG10 dashboard.
 
+        Layout:
+            LEFT   : Sync / Output
+            MIDDLE : Configuration 1/2 / Frequency-Period
+            RIGHT  : Monitor
+
+        Delay and Live Parameter dashboard panels are intentionally omitted.
+        The Other section is opened as a compact dialog from the Other
+        navigation button.
+        """
         page = QWidget()
 
         grid = QGridLayout(page)
-
         grid.setContentsMargins(8, 6, 8, 6)
-
-        grid.setHorizontalSpacing(6)
-        grid.setVerticalSpacing(6)
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(10)
 
         sync = self.sync_card()
         config = self.config_card()
         freq = self.frequency_card()
+        # Make Configuration 1/2 exactly the same height as Sync.
+        sync_height = sync.sizeHint().height()
+        sync.setFixedHeight(sync_height)
+        config.setFixedHeight(sync_height)
         output = self.output_card()
         monitor = self.monitor_card()
-        other = self.other_card()
 
-        # Defensive validation: every dashboard section must return its QFrame.
-        dashboard_cards = {
-            "Sync": sync,
-            "Config 1/2": config,
-            "Freq / Period": freq,
-            "Output": output,
-            "Monitor": monitor,
-            "Other": other,
-        }
-        missing_cards = [name for name, widget in dashboard_cards.items() if widget is None]
-        if missing_cards:
-            raise RuntimeError(
-                "Dashboard card returned None: " + ", ".join(missing_cards)
-            )
-
-        # Store dashboard sections for navigation highlighting
         self.section_cards = {
             "Sync": sync,
             "Freq / Period": freq,
             "Config 1/2": config,
             "Output": output,
             "Monitor": monitor,
-            "Other": other,
         }
 
-        # ----------------------------------------------------
-        # MAIN DASHBOARD
-        # ----------------------------------------------------
-        # The dashboard Live parameter strip is intentionally not placed
-        # between Sync/Config and Output/Frequency. Live parameters now
-        # belong below the Monitor output table.
-        grid.addWidget(sync, 0, 0)
-        grid.addWidget(config, 0, 1)
-        grid.addWidget(monitor, 0, 2, 3, 1)
-        grid.addWidget(output, 1, 0)
-        grid.addWidget(freq, 1, 1)
-        grid.addWidget(other, 2, 0, 1, 2)
+        for card in (sync, config, freq, output, monitor):
+            card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-        grid.setColumnStretch(0, 43)
-        grid.setColumnStretch(1, 17)
-        grid.setColumnStretch(2, 40)
+        # LEFT: Sync above Output.
+        left_column = QWidget()
+        left_layout = QVBoxLayout(left_column)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(8)
+        left_layout.addWidget(sync, 1)
+        left_layout.addWidget(output, 1)
 
-        grid.setRowMinimumHeight(0, 390)
-        grid.setRowMinimumHeight(1, 170)
-        grid.setRowMinimumHeight(2, 80)
+        # MIDDLE: Configuration above Frequency / Period.
+        middle_column = QWidget()
+        middle_layout = QVBoxLayout(middle_column)
+        middle_layout.setContentsMargins(0, 0, 0, 0)
+        middle_layout.setSpacing(8)
+        #config.setMinimumHeight(sync.sizeHint().height())
+        middle_layout.addWidget(freq, 1)
+        middle_layout.addWidget(config, 1)
 
-        grid.setRowStretch(0, 34)
-        grid.setRowStretch(1, 18)
-        grid.setRowStretch(2, 7)
+        grid.addWidget(left_column, 0, 0, 2, 1)
+        grid.addWidget(middle_column, 0, 1, 2, 1)
+        grid.addWidget(monitor, 0, 2, 2, 1)
+
+        # Keep Sync/Config horizontally compact while giving Monitor enough
+        # width for all eight output rows and the two live-parameter tiles.
+        grid.setColumnStretch(0, 38)
+        grid.setColumnStretch(1, 27)
+        grid.setColumnStretch(2, 35)
+        grid.setRowStretch(0, 1)
+        grid.setRowStretch(1, 1)
 
         return page
 
@@ -1530,9 +2307,6 @@ class TG10Window(QMainWindow):
         sync_layout.addWidget(self.dashboard_live_sync)
         layout.addWidget(sync_tile, 1)
 
-        self.dashboard_live_note = label("Internal timing reference", "SmallGrey")
-        layout.addWidget(self.dashboard_live_note)
-
         self._update_other_live_parameter()
         return frame
 
@@ -1541,324 +2315,284 @@ class TG10Window(QMainWindow):
     # ========================================================
 
     def sync_card(self):
-        """TG10-style Synchronization section with the exact 3-column geometry.
 
-        Geometry:
+        frame, body = make_card(
+            "∿",
+            "Synchronization (Sync)",
+            collapsible=False
+        )
+        # ====================================================
+        # SET BUTTON
+        # ====================================================
+        
+        add_card_action(
+            frame,
+            callback=self._set_sync_hardware,
+            text="Set"
+        )
 
-            Internal + One shot trigger | External SINGLE IN | External DUAL IN
+        # ====================================================
+        # MAIN SYNC MODE GROUP
+        # ====================================================
 
-        The External SINGLE IN and External DUAL IN panels occupy the full
-        vertical height.  Their height is equal to the combined height of
-        the Internal and One shot trigger panels on the left.
-        """
-        frame, body = make_card("∿", "Synchronization (Sync)")
-
-        # ------------------------------------------------------------
-        # TOP ROW — four synchronization mode selectors
-        # ------------------------------------------------------------
         mode_group = QButtonGroup(self)
         mode_group.setExclusive(True)
         self.sync_mode_group = mode_group
 
-        mode_names = [
-            "Internal",
-            "External SINGLE IN",
-            "External DUAL IN",
-            "One shot trigger",
+        self.internal_radio = QRadioButton("Internal Clock")
+        self.single_radio = QRadioButton("External\nSINGLE IN")
+        self.dual_radio = QRadioButton("External\nDUAL IN")
+        self.oneshot_radio = QRadioButton("One shot trigger")
+
+        radios = [
+            self.internal_radio,
+            self.single_radio,
+            self.dual_radio,
+            self.oneshot_radio,
         ]
 
-        # Keep ALL FOUR synchronization modes on ONE horizontal row.
-        # Fixed widths prevent Qt from wrapping the long labels into a
-        # second row when the Sync card is resized.
-        mode_row = QHBoxLayout()
-        mode_row.setContentsMargins(2, 0, 2, 4)
-        mode_row.setSpacing(8)
-
-        mode_buttons = []
-        mode_widths = [
-            92,   # Internal
-            165,  # External SINGLE IN
-            165,  # External DUAL IN
-            145,  # One shot trigger
-        ]
-
-        for idx, (name, width) in enumerate(zip(mode_names, mode_widths)):
-            radio = QRadioButton(name)
-            radio.setObjectName("SyncModeRadio")
-            radio.setChecked(idx == 0)
+        for i, radio in enumerate(radios):
             radio.setCursor(Qt.PointingHandCursor)
-            radio.setFixedWidth(width)
             radio.setMinimumHeight(30)
-            radio.setMaximumHeight(30)
-            radio.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-            mode_group.addButton(radio, idx)
-            mode_buttons.append(radio)
-            mode_row.addWidget(radio, 0)
+            mode_group.addButton(radio, i)
 
-        # Consume any remaining horizontal space without moving the
-        # synchronization options onto another row.
-        mode_row.addStretch(1)
-
-        self.internal_radio, self.single_radio, self.dual_radio, self.oneshot_radio = mode_buttons
+        self.internal_radio.setChecked(True)
         mode_group.idClicked.connect(self._sync_mode_selected)
-        body.addLayout(mode_row)
 
-        # ------------------------------------------------------------
-        # CONTENT — 3 columns
-        #
-        #   Column 0: Internal + One shot trigger
-        #   Column 1: External SINGLE IN (full height)
-        #   Column 2: External DUAL IN (full height)
-        #
-        # The two right-hand panels are deliberately the same total
-        # height as the two stacked panels on the left.
-        # ------------------------------------------------------------
-        content = QHBoxLayout()
-        content.setContentsMargins(0, 0, 0, 0)
-        content.setSpacing(10)
+        # ====================================================
+        # 1. INTERNAL BOX
+        # ====================================================
 
-        left_column = QVBoxLayout()
-        left_column.setContentsMargins(0, 0, 0, 0)
-        left_column.setSpacing(8)
+        internal_box = QGroupBox()
+        internal_box.setObjectName("SyncBox")
+        internal_box.setMinimumHeight(58)
 
-        def style_sync_panel(panel, title_text, icon_text="◈"):
-            outer = panel.layout()
-            old_header = outer.itemAt(0).widget()
-            old_header.deleteLater()
+        internal_layout = QHBoxLayout(internal_box)
+        internal_layout.setContentsMargins(10, 7, 10, 7)
+        internal_layout.setSpacing(10)
 
-            new_header = QWidget()
-            new_header_layout = QHBoxLayout(new_header)
-            new_header_layout.setContentsMargins(10, 5, 8, 3)
-            new_header_layout.setSpacing(5)
+        internal_layout.addWidget(self.internal_radio)
 
-            icon = QLabel(icon_text)
-            icon.setObjectName("SyncPanelIcon")
-            icon.setStyleSheet(
-                "color:#1976b9; font-size:12px; font-weight:800; background:transparent;"
-            )
-            title = QLabel(title_text)
-            title.setObjectName("SyncPanelTitle")
-            title.setStyleSheet(
-                "color:#124a7c; font-size:12px; font-weight:800; background:transparent;"
-            )
-            new_header_layout.addWidget(icon)
-            new_header_layout.addWidget(title)
-            new_header_layout.addStretch()
-            outer.insertWidget(0, new_header)
-
-        # ------------------------------------------------------------
-        # INTERNAL — left column, upper half
-        # ------------------------------------------------------------
-        internal, il = make_subpanel("")
-        style_sync_panel(internal, "Internal", "◈")
-
-        # The TG10 internal clock is a fixed 100 MHz timing reference.
-        # It is displayed as a read-only value, not a spin box, because
-        # there is no user-adjustable increase/decrease control here.
-        self.internal_freq = QLineEdit("100.000 MHz")
+        self.internal_freq = QLineEdit("100.000")
         self.internal_freq.setReadOnly(True)
         self.internal_freq.setAlignment(Qt.AlignCenter)
-        self.internal_freq.setFixedHeight(27)
-        self.internal_freq.setMinimumWidth(105)
+        self.internal_freq.setFixedHeight(28)
+        internal_layout.addWidget(self.internal_freq, 1)
 
-        il.addWidget(label("Clock", "FieldLabel"))
-        il.addWidget(self.internal_freq)
-        # The internal panel intentionally shows only the fixed 100 MHz clock.
-        # Do not add a separate "Timing reference" line here.
-        il.addStretch()
+        internal_layout.addWidget(
+            label("MHz", "FieldLabel", True)
+        )
 
-        # ------------------------------------------------------------
-        # ONE SHOT TRIGGER — left column, lower half
-        # ------------------------------------------------------------
-        oneshot, ol = make_subpanel("")
-        style_sync_panel(oneshot, "One shot trigger", "◈")
+        body.addWidget(internal_box)
 
-        self.software_trigger = QRadioButton("Software")
-        self.smart_trigger = QRadioButton("Smart")
-        self.software_trigger.setChecked(False)
+        # ====================================================
+        # 2. EXTERNAL SINGLE IN BOX
+        # ====================================================
 
-        self.one_shot_group = QButtonGroup(oneshot)
-        self.one_shot_group.setExclusive(True)
-        self.one_shot_group.addButton(self.software_trigger)
-        self.one_shot_group.addButton(self.smart_trigger)
+        single_box = QGroupBox()
+        single_box.setObjectName("SyncBox")
+        single_box.setMinimumHeight(78)
 
-        # Place Software and Smart vertically, centered in the One shot
-        # trigger panel, matching the user's sketch.
-        trigger_column = QVBoxLayout()
-        trigger_column.setContentsMargins(0, 2, 0, 2)
-        trigger_column.setSpacing(4)
-        trigger_column.setAlignment(Qt.AlignCenter)
+        single_layout = QGridLayout(single_box)
+        single_layout.setContentsMargins(10, 7, 10, 7)
+        single_layout.setHorizontalSpacing(8)
+        single_layout.setVerticalSpacing(5)
 
-        # Keep both radio buttons on one straight vertical axis while the
-        # whole group remains centered inside the One shot trigger panel.
-        trigger_stack = QWidget()
-        trigger_stack.setFixedWidth(105)
-        trigger_stack_layout = QVBoxLayout(trigger_stack)
-        trigger_stack_layout.setContentsMargins(0, 0, 0, 0)
-        trigger_stack_layout.setSpacing(4)
-        trigger_stack_layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        trigger_stack_layout.addWidget(self.software_trigger)
-        trigger_stack_layout.addWidget(self.smart_trigger)
+        single_layout.addWidget(
+            self.single_radio,
+            0, 0, 2, 1,
+            Qt.AlignVCenter
+        )
 
-        trigger_column.addWidget(trigger_stack, 0, Qt.AlignCenter)
-
-        ol.setContentsMargins(8, 2, 8, 2)
-        ol.setSpacing(2)
-        ol.addStretch(1)
-        ol.addLayout(trigger_column)
-        ol.addStretch(1)
-
-        # ------------------------------------------------------------
-        # EXTERNAL SINGLE IN — full-height middle column
-        # ------------------------------------------------------------
-        single, sl = make_subpanel("")
-        style_sync_panel(single, "External SINGLE IN", "◈")
-
-        sl.setSpacing(9)
-
-        sl.addWidget(label("Source", "FieldLabel"))
-
-        source_row = QHBoxLayout()
-        source_row.setContentsMargins(0, 0, 0, 0)
-        source_row.setSpacing(14)
-
-        self.single_source_group = QButtonGroup(single)
+        self.single_source_group = QButtonGroup(self)
         self.single_source_group.setExclusive(True)
 
         self.single_source_sync_radio = QRadioButton("SYNC IN")
         self.single_source_clk_radio = QRadioButton("CLK IN")
-        self.single_source_clk_radio.setChecked(False)
+        
 
-        self.single_source_group.addButton(self.single_source_sync_radio, 0)
-        self.single_source_group.addButton(self.single_source_clk_radio, 1)
-        source_row.addWidget(self.single_source_sync_radio)
-        source_row.addWidget(self.single_source_clk_radio)
-        source_row.addStretch()
-        sl.addLayout(source_row)
+        self.single_source_group.addButton(
+            self.single_source_sync_radio, 0
+        )
+        self.single_source_group.addButton(
+            self.single_source_clk_radio, 1
+        )
 
-        rate_label_row = QHBoxLayout()
-        rate_label_row.setContentsMargins(0, 4, 0, 0)
-        rate_label_row.addWidget(label("Rate", "FieldLabel"))
-        rate_label_row.addStretch()
-        sl.addLayout(rate_label_row)
+        single_layout.addWidget(
+            self.single_source_sync_radio, 0, 1
+        )
+        single_layout.addWidget(
+            self.single_source_clk_radio, 0, 2
+        )
 
-        # Numeric rate with the unit directly underneath, so MHz is clearly
-        # visible below the value instead of beside it.
-        rate_block = QVBoxLayout()
-        rate_block.setContentsMargins(0, 0, 0, 0)
-        rate_block.setSpacing(2)
+        single_layout.addWidget(
+            label("Rate", "FieldLabel", True),
+            1, 1
+        )
 
         self.external_rate = QDoubleSpinBox()
         self.external_rate.setDecimals(6)
-        self.external_rate.setValue(99.99)
-        self.external_rate.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.external_rate.setValue(10.0)
+        self.external_rate.setFixedHeight(28)
+        single_layout.addWidget(self.external_rate, 1, 2)
 
-        self.single_rate_unit = combo(["MHz", "kHz", "Hz"], 70)
-        self.single_rate_unit.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.single_rate_unit = combo(
+            ["MHz", "kHz", "Hz"],
+            62
+        )
+        single_layout.addWidget(self.single_rate_unit, 1, 3)
 
-        rate_block.addWidget(self.external_rate)
-        unit_row = QHBoxLayout()
-        unit_row.setContentsMargins(0, 0, 0, 0)
-        unit_row.setSpacing(0)
-        # Keep MHz directly below the numeric field, aligned to its left edge.
-        unit_row.addWidget(self.single_rate_unit, 0, Qt.AlignLeft)
-        unit_row.addStretch(1)
-        rate_block.addLayout(unit_row)
+        body.addWidget(single_box)
 
-        sl.addLayout(rate_block)
-        sl.addStretch()
+        # ====================================================
+        # 3. EXTERNAL DUAL IN BOX
+        # ====================================================
 
-        # ------------------------------------------------------------
-        # EXTERNAL DUAL IN — full-height right column
-        # ------------------------------------------------------------
-        dual, dl = make_subpanel("")
-        style_sync_panel(dual, "External DUAL IN", "◈")
+        dual_box = QGroupBox()
+        dual_box.setObjectName("SyncBox")
+        dual_box.setMinimumHeight(78)
 
-        # Each Dual-IN value gets its unit directly UNDER the numeric field,
-        # matching the requested TG10 sketch:
-        #
-        #   SYNC IN   [1.000000]
-        #                [MHz]
-        #
-        #   CLK IN    [99.990000]
-        #                [MHz]
-        def dual_value_block(spin, unit_combo):
-            block = QVBoxLayout()
-            block.setContentsMargins(0, 0, 0, 0)
-            block.setSpacing(2)
-            block.addWidget(spin)
-            block.addWidget(unit_combo, 0, Qt.AlignLeft)
-            return block
+        dual_layout = QGridLayout(dual_box)
+        dual_layout.setContentsMargins(10, 7, 10, 7)
+        dual_layout.setHorizontalSpacing(8)
+        dual_layout.setVerticalSpacing(5)
 
-        r3 = QHBoxLayout()
-        r3.setContentsMargins(0, 0, 0, 0)
-        r3.setSpacing(4)
-        r3.addWidget(label("SYNC IN", "FieldLabel"))
+        dual_layout.addWidget(
+            self.dual_radio,
+            0, 0, 2, 1,
+            Qt.AlignVCenter
+        )
+
+        dual_layout.addWidget(
+            label("SYNC IN", "FieldLabel", True),
+            0, 1
+        )
+
         self.dual_sync_input = QDoubleSpinBox()
         self.dual_sync_input.setDecimals(6)
         self.dual_sync_input.setValue(1.0)
-        self.dual_sync_unit = combo(["MHz", "kHz", "Hz"], 70)
-        r3.addLayout(dual_value_block(
-            self.dual_sync_input,
-            self.dual_sync_unit
-        ), 1)
-        dl.addLayout(r3)
+        self.dual_sync_input.setFixedHeight(28)
+        dual_layout.addWidget(self.dual_sync_input, 0, 2)
 
-        r4 = QHBoxLayout()
-        r4.setContentsMargins(0, 0, 0, 0)
-        r4.setSpacing(4)
-        r4.addWidget(label("CLK IN", "FieldLabel"))
+        self.dual_sync_unit = combo(
+            ["MHz", "kHz", "Hz"],
+            62
+        )
+        dual_layout.addWidget(self.dual_sync_unit, 0, 3)
+
+        dual_layout.addWidget(
+            label("CLK IN", "FieldLabel", True),
+            1, 1
+        )
+
         self.dual_clk_input = QDoubleSpinBox()
         self.dual_clk_input.setDecimals(6)
         self.dual_clk_input.setValue(99.99)
-        self.dual_clk_unit = combo(["MHz", "kHz", "Hz"], 70)
-        r4.addLayout(dual_value_block(
-            self.dual_clk_input,
-            self.dual_clk_unit
-        ), 1)
-        dl.addLayout(r4)
-        dl.addStretch()
+        self.dual_clk_input.setFixedHeight(28)
+        dual_layout.addWidget(self.dual_clk_input, 1, 2)
 
-        # ------------------------------------------------------------
-        # Assemble the exact geometry.
-        # ------------------------------------------------------------
-        left_column.addWidget(internal, 1)
-        left_column.addWidget(oneshot, 1)
+        self.dual_clk_unit = combo(
+            ["MHz", "kHz", "Hz"],
+            62
+        )
+        dual_layout.addWidget(self.dual_clk_unit, 1, 3)
 
-        content.addLayout(left_column, 1)
-        content.addWidget(single, 1.8)
-        content.addWidget(dual, 2.0)
+        body.addWidget(dual_box)
 
-        body.addLayout(content, 1)
+        # ====================================================
+        # 4. ONE SHOT / SOFTWARE / SMART BOX
+        # ====================================================
+
+        oneshot_box = QFrame()
+        oneshot_box.setObjectName("ConfigModeBox")
+        oneshot_box.setStyleSheet("""
+            QFrame#ConfigModeBox {
+                background: #ffffff;
+                border: 1px solid #c5d4e2;
+                border-radius: 4px;
+            }
+        """)
+
+        oneshot_lay = QHBoxLayout(oneshot_box)
+        oneshot_lay.setContentsMargins(10, 7, 10, 7)
+        oneshot_lay.setSpacing(40)
+
+        # Rename the existing One Shot radio for this horizontal layout
+        self.oneshot_radio.setText("One shot trigger")
+        self.oneshot_radio.setMinimumHeight(24)
+        self.oneshot_radio.setMinimumWidth(140)
+
+        self.software_trigger = QRadioButton("Software")
+        self.software_trigger.setMinimumHeight(24)
+        self.software_trigger.setMinimumWidth(100)
+        self.smart_trigger = QRadioButton("Smart")
+        self.smart_trigger.setMinimumHeight(24)
+        self.smart_trigger.setMinimumWidth(100)
+
+        self.software_trigger.setCursor(Qt.PointingHandCursor)
+        
+        self.smart_trigger.setCursor(Qt.PointingHandCursor)
+
+        self.software_trigger.setMinimumHeight(24)
+        self.smart_trigger.setMinimumHeight(24)
+
+        self.one_shot_group = QButtonGroup(oneshot_box)
+        self.one_shot_group.setExclusive(True)
+
+        # IMPORTANT:
+        # oneshot_radio already belongs to sync_mode_group.
+        # Do NOT add it to this group.
+
+        self.one_shot_group.addButton(self.software_trigger, 0)
+        self.one_shot_group.addButton(self.smart_trigger, 1)
+        
+        self.software_trigger.setChecked(False)
+        self.smart_trigger.setChecked(False)
+
+        oneshot_lay.addWidget(self.oneshot_radio)
+        oneshot_lay.addWidget(self.software_trigger)
+        oneshot_lay.addWidget(self.smart_trigger)
+        oneshot_lay.addStretch()
+
+
+        # sync_card() uses 'body'
+        body.addWidget(oneshot_box)
+
+        # ====================================================
+        # EXISTING HARDWARE INTEGRATION
+        # ====================================================
 
         self.sync_panels = {
-            "Internal": internal,
-            "External SINGLE IN": single,
-            "External DUAL IN": dual,
-            "One shot trigger": oneshot,
+            "Internal": internal_box,
+            "External SINGLE IN": single_box,
+            "External DUAL IN": dual_box,
+            "One shot trigger": oneshot_box,
         }
 
-        # ------------------------------------------------------------
-        # Signal connections
-        # ------------------------------------------------------------
         self.single_source_group.idClicked.connect(
             self._single_source_selected
         )
+
         self.single_rate_unit.currentTextChanged.connect(
             self._update_single_rate_range
         )
+
         self.external_rate.valueChanged.connect(
             self._update_other_live_parameter
         )
+
         self.dual_sync_unit.currentTextChanged.connect(
             self._update_dual_rate_ranges
         )
+
         self.dual_clk_unit.currentTextChanged.connect(
             self._update_dual_rate_ranges
         )
+
         self.dual_sync_input.valueChanged.connect(
             self._update_other_live_parameter
         )
+
         self.dual_clk_input.valueChanged.connect(
             self._update_other_live_parameter
         )
@@ -1868,13 +2602,6 @@ class TG10Window(QMainWindow):
         self._sync_mode_selected(0)
         self._update_other_live_parameter()
 
-        add_card_action(
-            frame,
-            lambda: (
-                self._commit_sync_to_monitor(),
-                self.set_status(f"Sync set: {self.sync_mode}")
-            )
-        )
         return frame
 
     def _single_source_selected(self, index):
@@ -1900,49 +2627,357 @@ class TG10Window(QMainWindow):
         if index < 0 or index >= len(names):
             return
 
+        # ------------------------------------------------------------
+        # Current main Sync mode
+        # ------------------------------------------------------------
+
         self.sync_mode = names[index]
 
-        # A sub-option belongs to its synchronization mode. When that mode
-        # is not selected, do not leave an old/default radio selection visible.
-        if hasattr(self, "software_trigger") and self.sync_mode != "One shot trigger":
-            self.software_trigger.setChecked(False)
-            self.smart_trigger.setChecked(False)
+        # ------------------------------------------------------------
+        # Keep the selected MAIN radio checked
+        # ------------------------------------------------------------
 
-        if hasattr(self, "single_source_sync_radio") and self.sync_mode != "External SINGLE IN":
+        selected_radio = self.sync_mode_group.button(index)
+
+        if selected_radio is not None:
+            self.sync_mode_group.setExclusive(False)
+
+            for radio in self.sync_mode_group.buttons():
+                radio.setChecked(radio is selected_radio)
+
+            self.sync_mode_group.setExclusive(True)
+
+        # ------------------------------------------------------------
+        # First disable all controls inside all 4 rows
+        # ------------------------------------------------------------
+
+        # INTERNAL
+        self.internal_freq.setEnabled(False)
+
+        # EXTERNAL SINGLE IN
+        self.single_source_sync_radio.setEnabled(False)
+        self.single_source_clk_radio.setEnabled(False)
+        self.external_rate.setEnabled(False)
+        self.single_rate_unit.setEnabled(False)
+
+        # EXTERNAL DUAL IN
+        self.dual_sync_input.setEnabled(False)
+        self.dual_sync_unit.setEnabled(False)
+        self.dual_clk_input.setEnabled(False)
+        self.dual_clk_unit.setEnabled(False)
+
+        # ONE SHOT
+        self.software_trigger.setEnabled(False)
+        self.smart_trigger.setEnabled(False)
+
+        # ------------------------------------------------------------
+        # Now enable ONLY the selected mode's controls
+        # ------------------------------------------------------------
+
+        if self.sync_mode == "Internal":
+
+            self.internal_freq.setEnabled(True)
+
+        elif self.sync_mode == "External SINGLE IN":
+
+            # Enable SINGLE IN controls
+            self.single_source_sync_radio.setEnabled(True)
+            self.single_source_clk_radio.setEnabled(True)
+            self.external_rate.setEnabled(True)
+            self.single_rate_unit.setEnabled(True)
+
+            # Default to SYNC IN when entering SINGLE IN
+            if (
+                not self.single_source_sync_radio.isChecked()
+                and not self.single_source_clk_radio.isChecked()
+            ):
+                self.single_source_sync_radio.setChecked(True)
+
+        elif self.sync_mode == "External DUAL IN":
+
+            self.dual_sync_input.setEnabled(True)
+            self.dual_sync_unit.setEnabled(True)
+            self.dual_clk_input.setEnabled(True)
+            self.dual_clk_unit.setEnabled(True)
+
+        elif self.sync_mode == "One shot trigger":
+
+            self.software_trigger.setEnabled(True)
+            self.smart_trigger.setEnabled(True)
+
+        # ------------------------------------------------------------
+        # MAIN RADIO BUTTONS MUST ALWAYS REMAIN ENABLED
+        # ------------------------------------------------------------
+
+        self.internal_radio.setEnabled(True)
+        self.single_radio.setEnabled(True)
+        self.dual_radio.setEnabled(True)
+        self.oneshot_radio.setEnabled(True)
+        
+        # ------------------------------------------------------------
+        # SINGLE IN sub-options
+        # ------------------------------------------------------------
+
+        if self.sync_mode != "External SINGLE IN":
+            self.single_source_group.setExclusive(False)
             self.single_source_sync_radio.setChecked(False)
             self.single_source_clk_radio.setChecked(False)
+            self.single_source_group.setExclusive(True)
+            
+        # ------------------------------------------------------------
+        # ONE SHOT sub-options
+        # ------------------------------------------------------------
 
-        # Only the selected mode can be operated. The other three panels
-        # remain visible but all of their controls are disabled.
-        for name, panel in self.sync_panels.items():
-            active = name == self.sync_mode
-            panel.setEnabled(active)
+        if self.sync_mode != "One shot trigger":
+            self.one_shot_group.setExclusive(False)
+            self.software_trigger.setChecked(False)
+            self.smart_trigger.setChecked(False)
+            self.one_shot_group.setExclusive(True)
 
-            if active:
-                panel.setStyleSheet("")
-            else:
-                panel.setStyleSheet(
-                    "QFrame#SubPanel { "
-                    "background:#f6f8fa; "
-                    "border:1px solid #dfe5ea; "
-                    "}"
-                )
-
-            for child in panel.findChildren(QLabel):
-                if child.objectName() == "SyncPanelIcon":
-                    child.setStyleSheet(
-                        "color:#1976b9; font-size:12px; font-weight:800; background:transparent;"
-                        if active else
-                        "color:#a8b5c1; font-size:12px; font-weight:800; background:transparent;"
-                    )
-                elif child.objectName() == "SyncPanelTitle":
-                    child.setStyleSheet(
-                        "color:#124a7c; font-size:12px; font-weight:800; background:transparent;"
-                        if active else
-                        "color:#9aa7b3; font-size:12px; font-weight:800; background:transparent;"
-                    )
+        # ------------------------------------------------------------
+        # Update live parameter
+        # ------------------------------------------------------------
 
         self._update_other_live_parameter()
+    
+    def _run_existing_sync_sequence(self, sequence_name):
+        """Run one of the existing TG10 Sync sequences from the backend.
+
+        No CAN ID, register address, payload, or sequence is invented here.
+        The GUI only selects a sequence that already exists in
+        Sy4000_can_control_org.py.
+        """
+        if not self.connection_state or self.serial_connection is None:
+            raise RuntimeError("TG10 is not connected. Open COM and connect first.")
+
+        backend = self.can_backend
+        if backend is None:
+            raise RuntimeError("TG10 CAN backend is not loaded.")
+
+        sequence = getattr(backend, sequence_name, None)
+        if sequence is None:
+            raise AttributeError(
+                f"Existing backend sequence '{sequence_name}' was not found."
+            )
+
+        run_sequence = getattr(backend, "run_sequence", None)
+        if not callable(run_sequence):
+            raise AttributeError(
+                "Sy4000_can_control_org.run_sequence() is not available."
+            )
+
+        run_sequence(self.serial_connection, sequence)
+
+    def _read_sync_hardware_status(self):
+        """Read the existing readv1 status dictionary after a Sync write."""
+        if not self.connection_state or self.serial_connection is None:
+            raise RuntimeError("TG10 is not connected.")
+
+        reader = self.can_reader
+        if reader is None:
+            raise RuntimeError("readv1 backend is not loaded.")
+
+        read_status = getattr(reader, "read_status", None)
+        if not callable(read_status):
+            raise AttributeError("readv1.read_status() is not available.")
+
+        return read_status(self.serial_connection, show=False)
+
+    @staticmethod
+    def _format_hz(value):
+        if value is None:
+            return "--"
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            return str(value)
+
+        if value >= 1e6:
+            return f"{value / 1e6:.6f} MHz"
+        if value >= 1e3:
+            return f"{value / 1e3:.6f} kHz"
+        return f"{value:.3f} Hz"
+
+    def _apply_hardware_sync_status(self, status):
+        """Reflect the readv1 hardware dictionary in the Sync live displays."""
+        if not isinstance(status, dict):
+            raise RuntimeError("readv1.read_status() did not return a dictionary.")
+
+        mode = status.get("mode")
+        clk = status.get("clk_in_hz")
+        sync = status.get("sync_in_hz")
+        out_hz = status.get("freq_hz")
+        ratediv = status.get("ratediv")
+
+        mode_names = {
+            "internal": "Internal",
+            "ext_clk": "External SINGLE IN",
+            "ext_sync": "External SINGLE IN",
+            "ext_dual": "External DUAL IN",
+            "oneshot": "One shot trigger",
+            "smart": "One shot trigger",
+        }
+        display_mode = mode_names.get(mode, str(mode) if mode else "Unknown")
+
+        # Hardware values, rather than the currently edited GUI spin boxes,
+        # are shown after a successful Set/readback cycle.
+        if hasattr(self, "other_live_clk"):
+            self.other_live_clk.setText(
+                "CLK IN: " + self._format_hz(clk)
+            )
+            self.other_live_sync.setText(
+                "SYNC IN: " + self._format_hz(sync)
+            )
+
+        if hasattr(self, "monitor_live_clk"):
+            self.monitor_live_clk.setText(
+                self._format_hz(clk)
+            )
+
+        if hasattr(self, "monitor_live_sync"):
+            self.monitor_live_sync.setText(
+                self._format_hz(sync)
+            )
+
+        if hasattr(self, "monitor_live_note"):
+            self.monitor_live_note.setText(
+                f"Hardware: {display_mode}"
+                + (
+                    f" | Output: {self._format_hz(out_hz)}"
+                    if out_hz is not None else ""
+                )
+                + (
+                    f" | Ratediv: {ratediv}"
+                    if ratediv is not None else ""
+                )
+            )
+
+        if hasattr(self, "dashboard_live_clk"):
+            self.dashboard_live_clk.setText(self._format_hz(clk))
+            self.dashboard_live_sync.setText(self._format_hz(sync))
+            self.dashboard_live_note.setText(
+                f"Hardware: {display_mode}"
+            )
+
+        # Keep the monitor's committed Sync label aligned with the actual
+        # hardware mode. Do not silently change the user's editable controls.
+        self.committed_sync_mode = display_mode
+        self.hardware_sync_status = status
+
+        return display_mode
+
+    def _set_sync_hardware(self):
+
+        operations = self.operations
+        mode = self.sync_mode
+
+        if mode == "Internal":
+
+            sequence = operations.build_internal_100mhz_from_period(
+                period_s=1.0 / 100_000_000.0,
+                command_on=False
+            )
+
+        elif mode == "External SINGLE IN":
+
+            source = self._single_source_name()
+
+            if source == "CLK IN":
+                
+                period_s = self._get_sync_output_period_s()
+
+                clk_in_hz = self._sync_value_to_hz(
+                    self.external_rate.value(),
+                    self.single_rate_unit.currentText()
+                )
+                
+                sequence = operations.build_external_clkin_from_period(
+                    period_s=period_s,
+                    fext_hz=clk_in_hz,
+                    command_on=False,
+                    include_readback=False
+                )
+
+            elif source == "SYNC IN":
+
+                period_s = self._get_sync_output_period_s()
+
+                sync_in_hz = self._sync_value_to_hz(
+                    self.external_rate.value(),
+                    self.single_rate_unit.currentText()
+                )
+
+                ratediv = self.calculations.calc_rate_divider(
+                    period_s,
+                    1.0 / sync_in_hz
+                )
+
+                sequence = operations.build_external_syncin(
+                    ratediv=ratediv,
+                    command_on=False
+                )
+
+            else:
+                return
+
+        elif mode == "External DUAL IN":
+
+            period_s = self._get_sync_output_period_s()
+
+            clk_in_hz = self._sync_value_to_hz(
+                self.dual_clk_input.value(),
+                self.dual_clk_unit.currentText()
+            )
+
+            sync_in_hz = self._sync_value_to_hz(
+                self.dual_sync_input.value(),
+                self.dual_sync_unit.currentText()
+            )
+
+            sequence = operations.build_external_dual_in_from_period(
+                period_s=period_s,
+                fext_hz=clk_in_hz,
+                syncin_hz=sync_in_hz,
+                command_on=False
+            )
+
+        elif mode == "One shot trigger":
+
+            if self.software_trigger.isChecked():
+
+                sequence = operations.seq_oneshot_software(
+                    command_on=False
+                )
+
+            elif self.smart_trigger.isChecked():
+
+                sequence = operations.seq_oneshot_smart(
+                    command_on=False
+                )
+
+            else:
+                return
+
+        else:
+            return
+        
+        # Send the generated sequence to TG10
+        self.can_backend.send_sequence(
+            self.serial_connection,
+            sequence,
+            label="TG10 Sync"
+        )
+
+        # Read back the actual hardware state
+        status = self._read_sync_hardware_status()
+        detected = self._apply_hardware_sync_status(status)
+
+        self._update_monitor_values()
+
+        self.set_status(
+            f"Sync applied: {mode} | TG10 readback: {detected}"
+        )
+
 
     def _commit_sync_to_monitor(self):
         self.committed_sync_mode = self.sync_mode
@@ -1993,7 +3028,11 @@ class TG10Window(QMainWindow):
         # Live parameter display below the Monitor output table.
         if hasattr(self, "monitor_live_clk"):
             self.monitor_live_clk.setText(clk_text)
+
+        if hasattr(self, "monitor_live_sync"):
             self.monitor_live_sync.setText(sync_text)
+
+        if hasattr(self, "monitor_live_note"):
             self.monitor_live_note.setText(note)
 
         # Retain compatibility with the older dashboard live widgets if
@@ -2008,9 +3047,20 @@ class TG10Window(QMainWindow):
             return
         source = self._single_source_name()
         unit = self.single_rate_unit.currentText()
-        ranges = ({"MHz": (10.0,100.0), "kHz": (10000.0,100000.0), "Hz": (1e7,1e8)}
-                   if source == "CLK IN" else
-                   {"MHz": (1e-5,20.0), "kHz": (0.01,20000.0), "Hz": (0.01,2e7)})
+        ranges = (
+            {
+                "MHz": (20.0, 100.0),
+                "kHz": (20000.0, 100000.0),
+                "Hz": (2e7, 1e8),
+            }
+            if source == "CLK IN"
+            else
+            {
+                "MHz": (1e-5, 20.0),
+                "kHz": (0.01, 20000.0),
+                "Hz": (0.01, 2e7),
+            }
+        )
         lo, hi = ranges[unit]
         self.external_rate.setRange(lo, hi)
         self.external_rate.setValue(min(max(self.external_rate.value(), lo), hi))
@@ -2110,7 +3160,22 @@ class TG10Window(QMainWindow):
     def _period_to_s(self):
         factor = {"s":1.0,"ms":1e-3,"µs":1e-6,"ns":1e-9}[self.period_unit.currentText()]
         return self.period_value.value()*factor
+    
+    def _get_sync_output_period_s(self):
+        if hasattr(self, "current_period_s"):
+            return float(self.current_period_s)
 
+        return self._period_to_s()
+    
+    def _sync_value_to_hz(self, value, unit):
+        factor = {
+            "Hz": 1.0,
+            "kHz": 1e3,
+            "MHz": 1e6,
+        }[unit]
+
+        return float(value) * factor
+    
     def _set_frequency_hz(self, hz):
         hz=max(0.01,min(20e6,float(hz)))
         self.current_frequency_hz=hz; self.current_period_s=1.0/hz
@@ -2162,21 +3227,12 @@ class TG10Window(QMainWindow):
     # ========================================================
 
     def config_card(self):
-        """Configuration 1/2 card arranged like the user's sketch.
-
-        Layout:
-            LEFT COLUMN  : Normal / Gate / Frequency divider
-            RIGHT COLUMN : Burst (full height)
-
-        Keeping all four mode boxes visible removes the large empty area that
-        appeared when the selected mode had few/no dynamic controls.
-        """
-        frame, body = make_card("⚙", "Configuration 1 / 2")
-        frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        frame.setFixedHeight(300)
+        """Compact Configuration 1/2 layout matching the approved sketch."""
+        frame, body = make_card("⚙", "Configuration 1 / 2", collapsible=False)
+        frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self._config_card_frame = frame
 
-        body.setContentsMargins(12, 0, 12, 8)
+        body.setContentsMargins(8, 0, 8, 8)
         body.setSpacing(4)
 
         self.config_settings = {
@@ -2191,232 +3247,265 @@ class TG10Window(QMainWindow):
         self.active_config_name = "Config 1"
         self.committed_config_name = "Config 1"
 
-        # ------------------------------------------------------------
-        # MODE label above all four mutually-exclusive mode boxes.
-        # ------------------------------------------------------------
-        body.addWidget(label("Mode", "FieldLabel", bold=True))
-
-        # ------------------------------------------------------------
-        # Four mode boxes, arranged exactly as the sketch:
-        #
-        #   ┌──────────────┐   ┌─────────────────────────────┐
-        #   │ ○ Normal     │   │ ○ Burst                    │
-        #   └──────────────┘   │ Burst trigger               │
-        #   ┌──────────────┐   │ ○ SYNC IN  ○ GATE           │
-        #   │ ○ Gate       │   │ ○ nGATE   ○ Software        │
-        #   │ ○ GATE       │   │ Burst count                 │
-        #   │ ○ nGATE      │   │ [                       ]   │
-        #   └──────────────┘   └─────────────────────────────┘
-        #   ┌──────────────┐
-        #   │ Frequency    │
-        #   │ divider      │
-        #   │ Division ... │
-        #   │ [          ] │
-        #   └──────────────┘
-        # ------------------------------------------------------------
-        content_grid = QGridLayout()
-        content_grid.setContentsMargins(0, 0, 0, 0)
-        content_grid.setHorizontalSpacing(8)
-        content_grid.setVerticalSpacing(6)
-        content_grid.setColumnStretch(0, 1)
-        content_grid.setColumnStretch(1, 2)
-        content_grid.setRowStretch(0, 1)
-        content_grid.setRowStretch(1, 1)
-        content_grid.setRowStretch(2, 1)
+        grid = QGridLayout()
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(7)
+        grid.setVerticalSpacing(5)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+        grid.setRowStretch(0, 1)
+        grid.setRowStretch(1, 1)
+        grid.setRowStretch(2, 1)
 
         self.config_mode_group = QButtonGroup(self)
         self.config_mode_group.setExclusive(True)
         self.config_mode_buttons = {}
 
-        def mode_box(mode_name, parent=None):
-            box = QFrame(parent)
+        def mode_box():
+            box = QFrame()
             box.setObjectName("ConfigModeBox")
             box.setStyleSheet("""
                 QFrame#ConfigModeBox {
-                    background: #ffffff;
-                    border: 1px solid #c5d4e2;
-                    border-radius: 4px;
+                    background:#ffffff;
+                    border:1px solid #c5d4e2;
+                    border-radius:4px;
                 }
             """)
-            layout = QVBoxLayout(box)
-            layout.setContentsMargins(10, 7, 10, 7)
-            layout.setSpacing(4)
-            return box, layout
+            lay = QVBoxLayout(box)
+            lay.setContentsMargins(8, 6, 8, 6)
+            lay.setSpacing(3)
+            return box, lay
 
-        def add_mode_radio(layout, mode_name):
-            radio = QRadioButton(mode_name)
-            radio.setObjectName("ConfigModeRadio")
-            radio.setCursor(Qt.PointingHandCursor)
-            radio.setMinimumHeight(25)
-            self.config_mode_group.addButton(radio)
-            self.config_mode_buttons[mode_name] = radio
-            layout.addWidget(radio)
-            return radio
+        def mode_radio(lay, name):
+            r = QRadioButton(name)
+            r.setMinimumHeight(24)
+            self.config_mode_group.addButton(r)
+            self.config_mode_buttons[name] = r
+            lay.addWidget(r)
+            return r
 
-        # ---------------- NORMAL ----------------
-        normal_box, normal_layout = mode_box("Normal")
-        add_mode_radio(normal_layout, "Normal")
-        normal_layout.addStretch()
-        content_grid.addWidget(normal_box, 0, 0)
+        # ========================================================
+        # Configuration modes — single vertical layout
+        # ========================================================
 
-        # ---------------- GATE ----------------
-        gate_box, gate_layout = mode_box("Gate")
-        add_mode_radio(gate_layout, "Gate")
+        # --------------------------------------------------------
+        # Normal
+        # --------------------------------------------------------
+        normal_box, normal_lay = mode_box()
+        mode_radio(normal_lay, "Normal")
+        grid.addWidget(normal_box, 0, 0, 1, 2)
+
+
+        # --------------------------------------------------------
+        # Gate
+        # --------------------------------------------------------
+
+        gate_box, gate_lay = mode_box()
+
+        # --------------------------------------------------------
+        # Main Gate mode radio
+        # IMPORTANT:
+        # Gate belongs ONLY to config_mode_group.
+        # --------------------------------------------------------
+
+        gate_radio = QRadioButton("Gate")
+        gate_radio.setMinimumHeight(24)
+        gate_radio.setMinimumWidth(65)
+
+        self.config_mode_group.addButton(gate_radio)
+        self.config_mode_buttons["Gate"] = gate_radio
+
+
+        # --------------------------------------------------------
+        # GATE / nGATE sub-options
+        # --------------------------------------------------------
 
         gate_group = QButtonGroup(gate_box)
         gate_group.setExclusive(True)
-        gate_row = QHBoxLayout()
-        gate_row.setContentsMargins(2, 0, 0, 0)
-        gate_row.setSpacing(4)
 
-        self.config_gate_buttons = {}
         self.config_gate_group = gate_group
-        for option in ("GATE", "nGATE"):
-            radio = QRadioButton(option)
-            radio.setMinimumHeight(24)
-            radio.setFixedWidth(82 if option == "GATE" else 88)
-            # Do not pre-select a Gate sub-option while Normal is selected.
-            # The sub-option is selected only when Gate mode is activated.
-            radio.setChecked(False)
-            gate_group.addButton(radio)
-            self.config_gate_buttons[option] = radio
-            radio.toggled.connect(
-                lambda checked, value=option:
-                self._save_config_gate(value, checked)
-            )
-            gate_row.addWidget(radio)
+        self.config_gate_buttons = {}
+
+        # GATE
+        gate_option = QRadioButton("GATE")
+        gate_option.setMinimumWidth(65)
+        gate_group.addButton(gate_option, 0)
+
+        self.config_gate_buttons["GATE"] = gate_option
+
+        gate_option.toggled.connect(
+            lambda checked: self._save_config_gate("GATE", checked)
+        )
+
+        # nGATE
+        ngate_option = QRadioButton("nGATE")
+        ngate_option.setMinimumWidth(65)
+        gate_group.addButton(ngate_option, 1)
+
+        self.config_gate_buttons["nGATE"] = ngate_option
+
+        ngate_option.toggled.connect(
+            lambda checked: self._save_config_gate("nGATE", checked)
+        )
+
+
+        # --------------------------------------------------------
+        # Put all 3 radios on ONE horizontal line
+        # --------------------------------------------------------
+
+        gate_row = QHBoxLayout()
+        gate_row.setContentsMargins(0, 0, 0, 0)
+        gate_row.setSpacing(40)
+
+        gate_row.addWidget(gate_radio)
+        gate_row.addWidget(gate_option)
+        gate_row.addWidget(ngate_option)
         gate_row.addStretch()
-        gate_layout.addLayout(gate_row)
-        gate_layout.addStretch()
-        content_grid.addWidget(gate_box, 1, 0)
 
-        # ---------------- FREQUENCY DIVIDER ----------------
-        divider_box, divider_layout = mode_box("Frequency divider")
-        add_mode_radio(divider_layout, "Frequency divider")
+        gate_lay.addLayout(gate_row)
 
-        divider_layout.addWidget(
-            label("Division of output frequency", "FieldLabel", bold=True)
-        )
+        grid.addWidget(gate_box, 1, 0, 1, 2)
 
-        divider_row = QHBoxLayout()
-        divider_row.setContentsMargins(4, 0, 0, 0)
-        divider_row.setSpacing(7)
 
-        self.config_divider_widget = QSpinBox()
-        self.config_divider_widget.setRange(1, 32767)
-        self.config_divider_widget.setValue(
-            self.config_settings["Config 1"]["divider"]
-        )
-        self.config_divider_widget.setFixedWidth(150)
-        self.config_divider_widget.valueChanged.connect(
-            self._save_config_divider
-        )
-        divider_row.addWidget(self.config_divider_widget)
-        divider_row.addStretch()
-        divider_layout.addLayout(divider_row)
-        divider_layout.addStretch()
-        content_grid.addWidget(divider_box, 2, 0)
+        # --------------------------------------------------------
+        # Burst
+        # --------------------------------------------------------
+        burst_box, burst_lay = mode_box()
 
-        # ---------------- BURST (FULL RIGHT COLUMN) ----------------
-        burst_box, burst_layout = mode_box("Burst")
-        add_mode_radio(burst_layout, "Burst")
+        mode_radio(burst_lay, "Burst")
 
-        burst_layout.addSpacing(5)
-        burst_layout.addWidget(
+        # Main horizontal layout:
+        #   LEFT  -> Burst trigger options
+        #   RIGHT -> Burst count
+        burst_content = QHBoxLayout()
+        burst_content.setContentsMargins(0, 2, 0, 0)
+        burst_content.setSpacing(18)
+
+        # -------------------------
+        # Left: Burst trigger
+        # -------------------------
+        trigger_section = QVBoxLayout()
+        trigger_section.setContentsMargins(0, 0, 0, 0)
+        trigger_section.setSpacing(3)
+
+        trigger_section.addWidget(
             label("Burst trigger", "FieldLabel", bold=True)
         )
 
         burst_group = QButtonGroup(burst_box)
         burst_group.setExclusive(True)
-        self.config_burst_buttons = {}
+
         self.config_burst_group = burst_group
+        self.config_burst_buttons = {}
 
-        # Two rows, as in the sketch.
         trigger_grid = QGridLayout()
-        trigger_grid.setContentsMargins(4, 0, 4, 0)
+        trigger_grid.setContentsMargins(0, 0, 0, 0)
         trigger_grid.setHorizontalSpacing(18)
-        trigger_grid.setVerticalSpacing(4)
+        trigger_grid.setVerticalSpacing(2)
 
-        options = [
+        for option, row, col in [
             ("SYNC IN", 0, 0),
             ("GATE", 0, 1),
             ("nGATE", 1, 0),
             ("Software", 1, 1),
-        ]
-        for option, row, col in options:
-            radio = QRadioButton(option)
-            radio.setMinimumHeight(26)
-            radio.setMinimumWidth(82 if option in ("GATE", "nGATE") else 92)
-            # Do not pre-select a Burst trigger while Normal is selected.
-            # The trigger is selected only when Burst mode is activated.
-            radio.setChecked(False)
-            burst_group.addButton(radio)
-            self.config_burst_buttons[option] = radio
-            radio.toggled.connect(
+        ]:
+            r = QRadioButton(option)
+            r.setMinimumHeight(24)
+
+            burst_group.addButton(r)
+            self.config_burst_buttons[option] = r
+
+            r.toggled.connect(
                 lambda checked, value=option:
                 self._save_config_burst_source(value, checked)
             )
-            trigger_grid.addWidget(radio, row, col)
 
-        burst_layout.addLayout(trigger_grid)
-        burst_layout.addSpacing(8)
-        burst_layout.addWidget(
+            trigger_grid.addWidget(r, row, col)
+
+        trigger_section.addLayout(trigger_grid)
+
+        burst_content.addLayout(trigger_section, 2)
+
+
+        # -------------------------
+        # Right: Burst count
+        # -------------------------
+        count_section = QVBoxLayout()
+        count_section.setContentsMargins(0, 0, 0, 0)
+        count_section.setSpacing(3)
+
+        count_section.addWidget(
             label("Burst count", "FieldLabel", bold=True)
         )
 
-        count_row = QHBoxLayout()
-        count_row.setContentsMargins(4, 0, 4, 0)
-        count_row.setSpacing(8)
-
         self.burst_count_widget = QSpinBox()
         self.burst_count_widget.setRange(1, 65535)
-        self.burst_count_widget.setValue(
-            self.config_settings["Config 1"]["burst_count"]
-        )
-        self.burst_count_widget.setFixedWidth(180)
+        self.burst_count_widget.setValue(1)
+        self.burst_count_widget.setMinimumHeight(28)
         self.burst_count_widget.valueChanged.connect(
             self._save_config_burst_count
         )
-        self.config_burst_count_row = count_row
-        count_row.addWidget(self.burst_count_widget)
-        count_row.addStretch()
-        burst_layout.addLayout(count_row)
-        burst_layout.addStretch()
-        content_grid.addWidget(burst_box, 0, 1, 3, 1)
 
-        body.addLayout(content_grid, 1)
+        count_section.addWidget(self.burst_count_widget)
+        count_section.addStretch()
+
+        burst_content.addLayout(count_section, 1)
+
+        burst_lay.addLayout(burst_content)
+
+        grid.addWidget(burst_box, 2, 0, 1, 2)
+
+
+        # --------------------------------------------------------
+        # Frequency divider
+        # --------------------------------------------------------
+        divider_box, divider_lay = mode_box()
+
+        mode_radio(divider_lay, "Frequency divider")
+
+        divider_lay.addWidget(
+            label("Division of Freq", "FieldLabel", bold=True)
+        )
+
+        self.config_divider_widget = QSpinBox()
+        self.config_divider_widget.setRange(1, 32767)
+        self.config_divider_widget.setValue(1)
+        self.config_divider_widget.setMinimumHeight(28)
+
+        self.config_divider_widget.valueChanged.connect(
+            self._save_config_divider
+        )
+
+        divider_lay.addWidget(self.config_divider_widget)
+
+        grid.addWidget(divider_box, 3, 0, 1, 2)
+        body.addLayout(grid, 1)
 
         add_card_action(
             frame,
             lambda: (
                 self._commit_config_to_monitor(),
-                self.set_status(
-                    f'Config 1/2 set: {self.config_settings["Config 1"]["mode"]}'
-                )
-            )
+                self.set_status(f'Config 1/2 set: {self.config_settings["Config 1"]["mode"]}')
+            ),
+            "Set",
         )
 
-        self.config_mode_group.buttonClicked.connect(
-            self._configuration_mode_radio_clicked
-        )
-
+        self.config_mode_group.buttonClicked.connect(self._configuration_mode_radio_clicked)
         self.config_mode_buttons["Normal"].setChecked(True)
         self._configuration_mode_changed("Normal")
         return frame
 
     def _set_config_card_height(self, mode):
-        """Keep the Configuration card compact instead of filling dashboard row 0."""
+        """Allow Configuration 1 / 2 to fill the same vertical space as Sync."""
         if not hasattr(self, "_config_card_frame"):
             return
 
-        # Content-sized heights: Normal is shortest; Burst needs extra room.
-        heights = {
-            "Normal": 205,
-            "Gate": 255,
-            "Burst": 285,
-            "Frequency divider": 255,
-        }
-        self._config_card_frame.setFixedHeight(heights.get(mode, 255))
+        self._config_card_frame.setMinimumHeight(0)
+        self._config_card_frame.setMaximumHeight(16777215)
+        self._config_card_frame.setSizePolicy(
+            QSizePolicy.Expanding,
+            QSizePolicy.Expanding
+        )
         self._config_card_frame.updateGeometry()
 
     def _configuration_mode_radio_clicked(self, button):
@@ -2668,6 +3757,22 @@ class TG10Window(QMainWindow):
         self.output_c1_fall.setCurrentText("DEL1")
         self.output_c1_fall.currentTextChanged.connect(self._output_condition_changed)
         c1_grid.addWidget(self.output_c1_fall, 1, 1)
+
+        c1_grid.addWidget(label("Pulse width", "FieldLabel"), 2, 0)
+        self.output_c1_pulse = QDoubleSpinBox()
+        self.output_c1_pulse.setRange(0.001, 150000000.0)
+        self.output_c1_pulse.setDecimals(2)
+        self.output_c1_pulse.setValue(25.64)
+        self.output_c1_pulse.setFixedHeight(28)
+        self.output_c1_pulse_unit = combo(["ps", "ns", "us"], 58)
+        pulse1_row = QHBoxLayout()
+        pulse1_row.setContentsMargins(0, 0, 0, 0)
+        pulse1_row.setSpacing(4)
+        pulse1_row.addWidget(self.output_c1_pulse)
+        pulse1_row.addWidget(self.output_c1_pulse_unit)
+        pulse1_container = QWidget()
+        pulse1_container.setLayout(pulse1_row)
+        c1_grid.addWidget(pulse1_container, 2, 1)
         condition_row.addWidget(config1, 1)
 
         config2 = QGroupBox("Config 2")
@@ -2687,6 +3792,22 @@ class TG10Window(QMainWindow):
         self.output_c2_fall.setCurrentText("DEL3")
         self.output_c2_fall.currentTextChanged.connect(self._output_condition_changed)
         c2_grid.addWidget(self.output_c2_fall, 1, 1)
+
+        c2_grid.addWidget(label("Pulse width", "FieldLabel"), 2, 0)
+        self.output_c2_pulse = QDoubleSpinBox()
+        self.output_c2_pulse.setRange(0.001, 150000000.0)
+        self.output_c2_pulse.setDecimals(2)
+        self.output_c2_pulse.setValue(25.64)
+        self.output_c2_pulse.setFixedHeight(28)
+        self.output_c2_pulse_unit = combo(["ps", "ns", "us"], 58)
+        pulse2_row = QHBoxLayout()
+        pulse2_row.setContentsMargins(0, 0, 0, 0)
+        pulse2_row.setSpacing(4)
+        pulse2_row.addWidget(self.output_c2_pulse)
+        pulse2_row.addWidget(self.output_c2_pulse_unit)
+        pulse2_container = QWidget()
+        pulse2_container.setLayout(pulse2_row)
+        c2_grid.addWidget(pulse2_container, 2, 1)
         condition_row.addWidget(config2, 1)
 
         body.addLayout(condition_row)
@@ -2884,30 +4005,24 @@ class TG10Window(QMainWindow):
 
         header.addStretch()
 
-        header.addWidget(
-            label(
-                "Update:",
-                "FieldLabel"
-            )
+        self.monitor_refresh_button = QPushButton("Refresh")
+        self.monitor_refresh_button.setObjectName("HdrBtn")
+        self.monitor_refresh_button.setFocusPolicy(Qt.NoFocus)
+        self.monitor_refresh_button.setFixedWidth(88)
+        
+        self.monitor_refresh_button.clicked.connect(
+            self._refresh_monitor_hardware
         )
+        header.addWidget(self.monitor_refresh_button)
 
-        update_rate = combo(
-            ["100 ms", "250 ms", "500 ms", "1 s"],
-            92
+        self.monitor_refresh_spinner = QLabel("↻")
+        self.monitor_refresh_spinner.setObjectName("RefreshArrow")
+        self.monitor_refresh_spinner.setAlignment(Qt.AlignCenter)
+        self.monitor_refresh_spinner.setFixedSize(30, 34)
+        self.monitor_refresh_spinner.setToolTip(
+            "↻ Idle • rotating while Monitor is being refreshed"
         )
-        update_rate.setMinimumWidth(92)
-        update_rate.setObjectName("MonitorUpdateCombo")
-        update_rate.setToolTip("Monitor refresh interval")
-        header.addWidget(update_rate)
-
-        refresh = QToolButton()
-        refresh.setObjectName("Chevron")
-        refresh.setText("↻")
-        refresh.setFixedSize(22, 22)
-        refresh.clicked.connect(
-            self._update_monitor_values
-        )
-        header.addWidget(refresh)
+        header.addWidget(self.monitor_refresh_spinner)
 
         # ----------------------------------------------------
         # 1st + 2nd + 3rd monitor layers
@@ -3095,22 +4210,559 @@ class TG10Window(QMainWindow):
         sync_layout.addWidget(self.monitor_live_sync)
         live_layout.addWidget(sync_tile, 1)
 
-        self.monitor_live_note = label(
-            "Internal timing reference",
-            "SmallGrey"
-        )
-        live_layout.addWidget(self.monitor_live_note)
-
         body.addWidget(live)
 
         self._update_monitor_values()
 
         return frame
 
+    @staticmethod
+    def _monitor_frequency_text(monitor, value):
+        """Use the existing TG10 monitor backend formatter."""
+        try:
+            return monitor.fmt_freq(value)
+        except Exception:
+            if value is None:
+                return "--"
+            value = float(value)
+            if value >= 1e6:
+                return f"{value / 1e6:.6f} MHz"
+            if value >= 1e3:
+                return f"{value / 1e3:.3f} kHz"
+            return f"{value:.3f} Hz"
+
+    @staticmethod
+    def _monitor_period_text(monitor, value):
+        """Use the existing TG10 monitor backend formatter."""
+        try:
+            # The backend uses "us"; the GUI uses the TG10-style micro symbol.
+            result = monitor.fmt_period(value)
+            return result.replace(" us", " µs")
+        except Exception:
+            if value is None:
+                return "--"
+            value = float(value)
+            if value < 1e-6:
+                return f"{value * 1e9:.3f} ns"
+            if value < 1e-3:
+                return f"{value * 1e6:.3f} µs"
+            if value < 1:
+                return f"{value * 1e3:.3f} ms"
+            return f"{value:.6f} s"
+
+    @staticmethod
+    def _monitor_mode_text(mode):
+        names = {
+            "internal": "Internal",
+            "ext_clk": "External SINGLE IN",
+            "ext_sync": "External SINGLE IN",
+            "ext_dual": "External DUAL IN",
+            "oneshot": "One shot trigger",
+            "smart": "Smart trigger",
+        }
+        return names.get(mode, str(mode) if mode is not None else "--")
+
+    def _update_monitor_output_table(self, output_data):
+        """
+        Update the existing eight-row Monitor table from TG10 hardware.
+
+        Columns:
+            0 = Output
+            1 = Config1 Rise delay
+            2 = Config1 Fall delay
+            3 = Config2 Rise delay
+            4 = Config2 Fall delay
+            5 = Logic out
+        """
+        if not hasattr(self, "monitor_table_widget"):
+            return
+
+        table = self.monitor_table_widget
+
+        for block in range(8):
+            row = block
+            data = output_data.get(block, {}) if isinstance(output_data, dict) else {}
+
+            values = [
+                f"OUT{block}",
+                data.get("conf1", {}).get("rise", "NC"),
+                data.get("conf1", {}).get("fall", "NC"),
+                data.get("conf2", {}).get("rise", "NC"),
+                data.get("conf2", {}).get("fall", "NC"),
+            ]
+
+            logic = data.get("logic_out")
+            values.append(
+                logic.get("text", "-") if isinstance(logic, dict) else "-"
+            )
+
+            for column, value in enumerate(values):
+                item = table.item(row, column)
+
+                if item is None:
+                    item = QTableWidgetItem()
+
+                    item.setTextAlignment(
+                        Qt.AlignCenter
+                    )
+
+                    table.setItem(
+                        row,
+                        column,
+                        item
+                    )
+
+                item.setText(str(value))
+
+    def _set_refresh_button_active(self, active):
+        if not hasattr(self, "monitor_refresh_button"):
+            return
+        self.monitor_refresh_button.setProperty("active", bool(active))
+        self.monitor_refresh_button.style().unpolish(self.monitor_refresh_button)
+        self.monitor_refresh_button.style().polish(self.monitor_refresh_button)
+        self.monitor_refresh_button.update()
+
+    def _toggle_refresh_visual(self, loading):
+        """Show the refresh state while the real hardware read is running."""
+        if hasattr(self, "monitor_refresh_button"):
+            self.monitor_refresh_button.setEnabled(not loading)
+            self._set_refresh_button_active(loading)
+
+        if not hasattr(self, "monitor_refresh_spinner"):
+            return
+
+        if loading:
+            self.monitor_refresh_frame_index = 0
+            self.monitor_refresh_spinner.setText(
+                self.monitor_refresh_frames[0]
+            )
+            self.monitor_refresh_spinner.show()
+
+            if self.monitor_refresh_timer is None:
+                self.monitor_refresh_timer = QTimer(self)
+                self.monitor_refresh_timer.setInterval(160)
+                self.monitor_refresh_timer.timeout.connect(
+                    self._animate_monitor_refresh
+                )
+
+            self.monitor_refresh_timer.start()
+        else:
+            if self.monitor_refresh_timer is not None:
+                self.monitor_refresh_timer.stop()
+
+            self.monitor_refresh_spinner.setText("↻")
+            self.monitor_refresh_spinner.show()
+
+    def _animate_monitor_refresh(self):
+        self.monitor_refresh_frame_index = (
+            self.monitor_refresh_frame_index + 1
+        ) % len(self.monitor_refresh_frames)
+
+        self.monitor_refresh_spinner.setText(
+            self.monitor_refresh_frames[
+                self.monitor_refresh_frame_index
+            ]
+        )
+
+    def _read_monitor_hardware_data(self):
+        """
+        Perform the existing Monitor backend reads and return only data.
+
+        No Qt widgets are touched here. This function runs in the worker
+        thread so the GUI remains responsive until the actual hardware
+        read completes.
+        """
+        monitor = self.monitor_backend
+        ser = self.serial_connection
+
+        if monitor is None:
+            raise RuntimeError("Monitor backend not loaded.")
+
+        result = {
+            "status": None,
+            "run_status": None,
+            "live": None,
+            "config": None,
+            "output_data": None,
+            "run_status_error": None,
+            "live_error": None,
+            "config_error": None,
+            "output_error": None,
+        }
+
+        # Existing backend read: status / sync / output frequency / period.
+        result["status"] = monitor.read_status(
+            ser,
+            show=False
+        )
+
+        # Existing backend read: device run status.
+        try:
+            result["run_status"] = monitor.read_run_status(ser)
+        except Exception as exc:
+            result["run_status_error"] = str(exc)
+
+        # Existing backend read: live CLK IN / SYNC IN.
+        try:
+            result["live"] = monitor.read_live(
+                ser,
+                show=False
+            )
+        except Exception as exc:
+            result["live_error"] = str(exc)
+
+        # Existing backend read: configuration.
+        try:
+            result["config"] = monitor.read_config(
+                ser,
+                show=False
+            )
+        except Exception as exc:
+            result["config_error"] = str(exc)
+
+        # Existing backend read: OUT0 ... OUT7 monitor information.
+        try:
+            result["output_data"] = monitor.read_mux_delay(
+                ser,
+                blocks=range(8),
+                show=False,
+                fast=False
+            )
+        except Exception as exc:
+            result["output_error"] = str(exc)
+
+        return result
+
+    def _apply_monitor_hardware_data(self, data):
+        """Apply completed hardware readback to Qt widgets on the GUI thread."""
+        monitor = self.monitor_backend
+
+        status = data["status"]
+        mode = status.get("mode")
+
+        self.monitor_sync_value.setText(
+            self._monitor_mode_text(mode)
+        )
+
+        out_hz = status.get("out_hz")
+        out_period_s = status.get("out_period_s")
+
+        if out_hz is not None and out_hz > 0:
+            self.monitor_freq_value.setText(
+                self._monitor_frequency_text(
+                    monitor,
+                    out_hz
+                )
+            )
+
+            if out_period_s is None:
+                out_period_s = 1.0 / out_hz
+
+            self.monitor_period_value.setText(
+                self._monitor_period_text(
+                    monitor,
+                    out_period_s
+                )
+            )
+        else:
+            self.monitor_freq_value.setText("--")
+            self.monitor_period_value.setText("--")
+
+        # Device status.
+        if data["run_status_error"] is None:
+            self.monitor_device_value.setText(
+                str(data["run_status"])
+            )
+        else:
+            print(
+                f"[MONITOR] Run status read failed: "
+                f"{data['run_status_error']}"
+            )
+            self.monitor_device_value.setText("UNKNOWN")
+
+        # Live parameters.
+        if data["live_error"] is None and data["live"] is not None:
+            live = data["live"]
+            clk_hz = live.get("clk_in_hz")
+            sync_hz = live.get("sync_in_hz")
+
+            if clk_hz is not None:
+                self.monitor_live_clk.setText(
+                    self._monitor_frequency_text(
+                        monitor,
+                        clk_hz
+                    )
+                )
+            else:
+                self.monitor_live_clk.setText("--")
+
+            if sync_hz is not None and sync_hz > 0:
+                self.monitor_live_sync.setText(
+                    self._monitor_frequency_text(
+                        monitor,
+                        sync_hz
+                    )
+                )
+            else:
+                self.monitor_live_sync.setText("--")
+        else:
+            print(
+                f"[MONITOR] Live parameter read failed: "
+                f"{data['live_error']}"
+            )
+            self.monitor_live_clk.setText("--")
+            self.monitor_live_sync.setText("--")
+
+        # Configuration.
+        if data["config_error"] is None and data["config"] is not None:
+            config = data["config"]
+            config_text = config.get(
+                "text",
+                config.get(
+                    "mode",
+                    "--"
+                )
+            )
+            self.monitor_config_value.setText(
+                str(config_text)
+            )
+        else:
+            print(
+                f"[MONITOR] Config read failed: "
+                f"{data['config_error']}"
+            )
+            self.monitor_config_value.setText("--")
+
+        # Output table.
+        if data["output_error"] is None:
+            self._update_monitor_output_table(
+                data["output_data"]
+            )
+        else:
+            print(
+                f"[MONITOR] Output table read failed: "
+                f"{data['output_error']}"
+            )
+
+        errors = []
+        for key, title in (
+            ("run_status_error", "run status"),
+            ("live_error", "live parameters"),
+            ("config_error", "config"),
+            ("output_error", "output table"),
+        ):
+            if data[key]:
+                errors.append(title)
+
+        if errors:
+            return "Monitor refreshed; partial read: " + ", ".join(errors)
+
+        return "Monitor refreshed from TG10 hardware"
+
+    # ========================================================
+    # BUILT-IN 10-SECOND INACTIVITY MONITOR REFRESH
+    # ========================================================
+
+    def _reset_monitor_inactivity_timer(self):
+        """Restart the invisible 10-second user-inactivity countdown."""
+        if not self.connection_state or self.serial_connection is None:
+            self.monitor_inactivity_timer.stop()
+            self._monitor_inactivity_refresh_enabled = False
+            return
+
+        self._monitor_inactivity_refresh_enabled = True
+        self.monitor_inactivity_timer.start()
+
+    def _start_monitor_inactivity_refresh(self):
+        """Start the invisible inactivity refresh countdown after connection."""
+        if not self.connection_state or self.serial_connection is None:
+            self.monitor_inactivity_timer.stop()
+            self._monitor_inactivity_refresh_enabled = False
+            return
+
+        self._monitor_inactivity_refresh_enabled = True
+        self.monitor_inactivity_timer.start()
+
+    def _stop_monitor_inactivity_refresh(self):
+        """Stop automatic inactivity refresh when TG10 is disconnected."""
+        self.monitor_inactivity_timer.stop()
+        self._monitor_inactivity_refresh_enabled = False
+
+    def _automatic_inactivity_refresh(self):
+        """
+        Refresh Monitor when the GUI has been unused for 10 seconds.
+
+        This is completely invisible to the user. The existing Monitor
+        worker performs the real hardware read; no fake delay or duplicate
+        hardware-read path is created.
+
+        The inactivity countdown is stopped while the refresh is running and
+        is started again only after the real worker finishes. Therefore the
+        next automatic refresh is another full 10 seconds after the last
+        user activity / completed refresh cycle.
+        """
+        if not self.connection_state or self.serial_connection is None:
+            self._stop_monitor_inactivity_refresh()
+            return
+
+        # Do not keep a second countdown running while the real hardware
+        # worker is active.
+        self.monitor_inactivity_timer.stop()
+
+        # _refresh_monitor_hardware() already prevents overlapping reads.
+        self._refresh_monitor_hardware()
+
+    def eventFilter(self, watched, event):
+        """
+        Reset the invisible 10-second inactivity countdown whenever the user
+        actually interacts with this GUI.
+
+        This covers normal GUI activity such as:
+        - mouse movement/clicks
+        - keyboard input
+        - mouse-wheel interaction
+
+        Programmatic updates from the Monitor worker do not generate these
+        user-input events, so they do not keep postponing the refresh.
+        """
+        if self.connection_state and self.serial_connection is not None:
+            user_events = {
+                QEvent.MouseMove,
+                QEvent.MouseButtonPress,
+                QEvent.KeyPress,
+                QEvent.Wheel,
+            }
+
+            if event.type() in user_events:
+                self._reset_monitor_inactivity_timer()
+
+        return super().eventFilter(watched, event)
+
+    def _refresh_monitor_hardware(self):
+        """
+        Start the existing Monitor hardware read in a worker thread.
+
+        The loading indicator remains visible until the actual backend
+        hardware reads return. There is no fixed artificial delay.
+        """
+        if (
+            not self.connection_state
+            or self.serial_connection is None
+        ):
+            self._set_refresh_button_active(True)
+            QTimer.singleShot(180, lambda: self._set_refresh_button_active(False))
+            self.set_status(
+                "Not connected — connect to TG10 first"
+            )
+            return
+
+        if self.monitor_backend is None:
+            self._set_refresh_button_active(True)
+            QTimer.singleShot(180, lambda: self._set_refresh_button_active(False))
+            self.set_status(
+                "Monitor backend not loaded"
+            )
+            return
+
+        if (
+            self.monitor_refresh_thread is not None
+            and self.monitor_refresh_thread.isRunning()
+        ):
+            return
+
+        self.set_status(
+            "Refreshing TG10 Monitor..."
+        )
+        self._toggle_refresh_visual(True)
+
+        self.monitor_refresh_thread = QThread(self)
+        self.monitor_refresh_worker = MonitorRefreshWorker(
+            self._read_monitor_hardware_data
+        )
+
+        self.monitor_refresh_worker.moveToThread(
+            self.monitor_refresh_thread
+        )
+
+        self.monitor_refresh_thread.started.connect(
+            self.monitor_refresh_worker.run
+        )
+        self.monitor_refresh_worker.finished.connect(
+            self._monitor_refresh_finished
+        )
+        self.monitor_refresh_worker.failed.connect(
+            self._monitor_refresh_failed
+        )
+        self.monitor_refresh_worker.finished.connect(
+            self.monitor_refresh_thread.quit
+        )
+        self.monitor_refresh_worker.failed.connect(
+            self.monitor_refresh_thread.quit
+        )
+        self.monitor_refresh_worker.finished.connect(
+            self.monitor_refresh_worker.deleteLater
+        )
+        self.monitor_refresh_worker.failed.connect(
+            self.monitor_refresh_worker.deleteLater
+        )
+        self.monitor_refresh_thread.finished.connect(
+            self._monitor_refresh_thread_finished
+        )
+
+        self.monitor_refresh_thread.start()
+
+    def _monitor_refresh_finished(self, data):
+        try:
+            message = self._apply_monitor_hardware_data(data)
+            self.set_status(message)
+        except Exception as exc:
+            self._monitor_refresh_failed(
+                f"Could not apply Monitor data: {exc}"
+            )
+
+    def _monitor_refresh_failed(self, error_text):
+        print(
+            f"[MONITOR] Hardware refresh failed: {error_text}"
+        )
+        self.set_status(
+            f"Monitor refresh failed: {error_text}"
+        )
+
+        QMessageBox.warning(
+            self,
+            "TG10 Monitor Refresh",
+            "Could not refresh the TG10 values.\n\n"
+            f"{error_text}"
+        )
+
+    def _monitor_refresh_thread_finished(self):
+        self._toggle_refresh_visual(False)
+
+        thread = self.monitor_refresh_thread
+        self.monitor_refresh_worker = None
+        self.monitor_refresh_thread = None
+
+        if thread is not None:
+            thread.deleteLater()
+
+        # Start a fresh 10-second inactivity window only after the real
+        # hardware read has completed. If the user interacted while the
+        # worker was running, eventFilter will already have restarted the
+        # timer, so do not overwrite that newer countdown.
+        if (
+            self.connection_state
+            and self.serial_connection is not None
+            and self.monitor_inactivity_timer is not None
+            and not self.monitor_inactivity_timer.isActive()
+        ):
+            self.monitor_inactivity_timer.start()
+
     def _update_monitor_values(self):
         """
-        Update only the values displayed by the Monitor section.
-        Other dashboard sections are not modified here.
+        Keep the existing Monitor update entry point.
+
+        When connected, perform a real hardware read.
+        When disconnected, show the neutral Monitor state.
         """
         if not hasattr(
             self,
@@ -3118,75 +4770,32 @@ class TG10Window(QMainWindow):
         ):
             return
 
-        # 1st layer
-        self.monitor_sync_value.setText(
-            self.committed_sync_mode
-        )
-
-        # 2nd layer
-        if hasattr(self, "committed_frequency_hz"):
-            freq_factor = {"Hz": 1.0, "kHz": 1e3, "MHz": 1e6}
-            freq_display = (
-                self.committed_frequency_hz /
-                freq_factor[self.committed_freq_unit]
-            )
-            self.monitor_freq_value.setText(
-                f"{freq_display:.8f} {self.committed_freq_unit}"
-            )
-
-        if hasattr(self, "committed_period_s"):
-            period_factor = {"s": 1.0, "ms": 1e-3, "µs": 1e-6, "ns": 1e-9}
-            period_display = (
-                self.committed_period_s /
-                period_factor[self.committed_period_unit]
-            )
-            self.monitor_period_value.setText(
-                f"{period_display:.8f} {self.committed_period_unit}"
-            )
-
-        # Config monitor
-        if hasattr(
-            self,
-            "config_settings"
+        if (
+            not self.connection_state
+            or self.serial_connection is None
+            or self.monitor_backend is None
         ):
-            cfg_name = self.committed_config_name
-            cfg = self.config_settings[cfg_name]
+            self.monitor_sync_value.setText("--")
+            self.monitor_config_value.setText("--")
+            self.monitor_freq_value.setText("--")
+            self.monitor_period_value.setText("--")
+            self.monitor_device_value.setText("OFF")
 
-            extra = ""
+            if hasattr(
+                self,
+                "monitor_live_clk"
+            ):
+                self.monitor_live_clk.setText("--")
 
-            if cfg["mode"] == "Burst":
-                burst_count_text = (
-                    "∞"
-                    if cfg.get("burst_infinite", False)
-                    else str(cfg.get("burst_count", 1))
-                )
-                extra = (
-                    f" / {cfg['burst_source']}"
-                    f" / {burst_count_text}"
-                )
+            if hasattr(
+                self,
+                "monitor_live_sync"
+            ):
+                self.monitor_live_sync.setText("--")
 
-            elif cfg["mode"] == "Gate":
-                extra = (
-                    f" / {cfg['gate']}"
-                )
+            return
 
-            elif cfg["mode"] == "Frequency divider":
-                extra = (
-                    f" / ÷{cfg['divider']}"
-                )
-
-            self.monitor_config_value.setText(
-                f"{cfg_name[-1]} "
-                f"({cfg['mode']})"
-                f"{extra}"
-            )
-
-        # 3rd layer
-        self.monitor_device_value.setText(
-            "RUN"
-            if self.running
-            else "OFF"
-        )
+        self._refresh_monitor_hardware()
 
     def monitor_table(self):
         """
@@ -3263,71 +4872,18 @@ class TG10Window(QMainWindow):
             QHeaderView.Stretch
         )
 
+        # Initial values shown before the first hardware refresh.
+        # They are deliberately neutral; Refresh replaces them with
+        # actual TG10 register readback.
         lcd_rows = [
-            [
-                "OUT0",
-                "25.64 ps",
-                "65.36 ns",
-                "25.64 ps",
-                "25.64 ps",
-                "-",
-            ],
-            [
-                "OUT1",
-                "NC",
-                "reset",
-                "25.64 ps",
-                "25.64 ps",
-                "-",
-            ],
-            [
-                "OUT2",
-                "25.64 ps",
-                "196.00 ns",
-                "25.64 ps",
-                "*196.00 ns",
-                "OUT2",
-            ],
-            [
-                "OUT3",
-                "25.64 ps",
-                "298.67 ns",
-                "25.64 ps",
-                "*298.67 ns",
-                "OUT3",
-            ],
-            [
-                "OUT4",
-                "25.64 ps",
-                "400.00 ns",
-                "109.89 ps",
-                "*400.00 ns",
-                "And OUT3",
-            ],
-            [
-                "OUT5",
-                "NC",
-                "NC",
-                "NC",
-                "NC",
-                "OUT5",
-            ],
-            [
-                "OUT6",
-                "set",
-                "NC",
-                "25.64 ps",
-                "reset",
-                "-",
-            ],
-            [
-                "OUT7",
-                "NC",
-                "NC",
-                "25.64 ps",
-                "*0.70 us",
-                "-",
-            ],
+            ["OUT0", "--", "--", "--", "--", "-"],
+            ["OUT1", "--", "--", "--", "--", "-"],
+            ["OUT2", "--", "--", "--", "--", "-"],
+            ["OUT3", "--", "--", "--", "--", "-"],
+            ["OUT4", "--", "--", "--", "--", "-"],
+            ["OUT5", "--", "--", "--", "--", "-"],
+            ["OUT6", "--", "--", "--", "--", "-"],
+            ["OUT7", "--", "--", "--", "--", "-"],
         ]
 
         for row_index, row_data in enumerate(
@@ -3370,69 +4926,48 @@ class TG10Window(QMainWindow):
             "• Live parameter"
         )
 
-    def other_card(self):
+    def open_other(self):
+        """Open the Other controls as a compact popup from the navigation bar.
 
-        frame, body = make_card(
-            "⚒",
-            "Other"
-        )
+        The dashboard has no permanent Other card.  The popup contains only
+        Push trigger and Frequency limit, with the frequency-limit controls
+        below the trigger controls as in the approved TG10 layout.
+        """
+        dialog = QDialog(self)
+        dialog.setWindowTitle("TG10 — Other")
+        dialog.setModal(False)
+        dialog.resize(520, 390)
 
-        # ============================================================
-        # TOP BUTTONS
-        # ============================================================
+        root = QVBoxLayout(dialog)
+        root.setContentsMargins(14, 14, 14, 14)
+        root.setSpacing(8)
 
-        tabs = QHBoxLayout()
-        tabs.setSpacing(5)
+        title_row = QHBoxLayout()
+        title_row.setSpacing(6)
+        title_row.addWidget(label("⚒", "CardIcon"))
+        title_row.addWidget(label("Other", "CardTitle"))
+        title_row.addStretch()
+        root.addLayout(title_row)
 
-        self.other_group = QButtonGroup(frame)
-        self.other_group.setExclusive(True)
+        selector = QHBoxLayout()
+        selector.setContentsMargins(0, 0, 0, 0)
+        selector.setSpacing(28)
+        push_radio = QRadioButton("Push trigger")
+        limit_radio = QRadioButton("Frequency limit")
+        push_radio.setChecked(True)
+        selector.addWidget(push_radio)
+        selector.addWidget(limit_radio)
+        selector.addStretch()
+        root.addLayout(selector)
 
-        self.other_buttons = []
-
-        names = [
-            "Push trigger",
-            "Frequency limit",
-            "Device presets",
-            "Sound",
-            "Info"
-        ]
-
-        for i, name in enumerate(names):
-            button = QRadioButton(name)
-            button.setObjectName("OtherRadio")
-            button.setMinimumHeight(24)
-            button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-
-            if i == 0:
-                button.setChecked(True)
-
-            self.other_group.addButton(button, i)
-            self.other_buttons.append(button)
-            tabs.addWidget(button, 1)
-
-        body.addLayout(tabs)
-
-        # ============================================================
-        # STACKED CONTENT AREA
-        # ============================================================
-
-        self.other_stack = QStackedWidget()
-
-        # ============================================================
-        # PAGE 1 — PUSH TRIGGER
-        # ============================================================
-
-        push_page = QWidget()
-        push_layout = QVBoxLayout(push_page)
-        push_layout.setContentsMargins(6, 3, 6, 3)
-        push_layout.setSpacing(3)
-        push_layout.addWidget(label("Push trigger", None, bold=True, color=DEEP))
-
-        # LCD Display Screens page 63 shows four force-trigger buttons:
-        # One shot trigger, Burst trigger, Latch SET trigger, Latch RESET trigger.
-        trigger_row = QHBoxLayout()
-        trigger_row.setContentsMargins(0, 0, 0, 0)
-        trigger_row.setSpacing(6)
+        # ------------------------------------------------------------
+        # Push trigger
+        # ------------------------------------------------------------
+        push_box = QGroupBox("Push trigger")
+        push_grid = QGridLayout(push_box)
+        push_grid.setContentsMargins(8, 8, 8, 8)
+        push_grid.setHorizontalSpacing(7)
+        push_grid.setVerticalSpacing(6)
 
         self.push_one_shot = QPushButton("One shot trigger")
         self.push_burst = QPushButton("Burst trigger")
@@ -3447,9 +4982,12 @@ class TG10Window(QMainWindow):
 
         for btn in self.push_trigger_buttons:
             btn.setObjectName("Seg")
-            btn.setMinimumHeight(28)
-            btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-            trigger_row.addWidget(btn, 1)
+            btn.setMinimumHeight(31)
+
+        push_grid.addWidget(self.push_one_shot, 0, 0)
+        push_grid.addWidget(self.push_burst, 0, 1)
+        push_grid.addWidget(self.push_latch_set, 1, 0)
+        push_grid.addWidget(self.push_latch_reset, 1, 1)
 
         self.push_one_shot.clicked.connect(
             lambda: self._force_push_trigger("One shot trigger")
@@ -3464,363 +5002,51 @@ class TG10Window(QMainWindow):
             lambda: self._force_push_trigger("Latch RESET trigger")
         )
 
-        push_layout.addLayout(trigger_row)
-        push_layout.addWidget(label("Push button to force trigger", "SmallGrey"))
-        self.other_stack.addWidget(push_page)
+        root.addWidget(push_box)
 
+        # ------------------------------------------------------------
+        # Frequency limit
+        # ------------------------------------------------------------
+        limit_box = QGroupBox("Frequency limit")
+        limit_grid = QGridLayout(limit_box)
+        limit_grid.setContentsMargins(8, 8, 8, 8)
+        limit_grid.setHorizontalSpacing(7)
+        limit_grid.setVerticalSpacing(5)
 
-        # PAGE 6 — LIVE PARAMETER
-        # TG10 manual: live parameters display frequencies at input channels.
-        live_page = QWidget()
-        live_layout = QGridLayout(live_page)
-        live_layout.setContentsMargins(6, 4, 6, 4)
-        live_layout.setHorizontalSpacing(10)
-        live_layout.setVerticalSpacing(5)
-
-        live_layout.addWidget(label("Live parameter", "FieldLabel", True), 0, 0, 1, 2)
-
-        self.other_live_clk = label("CLK IN: --", "TileValue")
-        self.other_live_sync = label("SYNC IN: --", "TileValue")
-
-        live_layout.addWidget(label("CLK IN", "FieldLabel"), 1, 0)
-        live_layout.addWidget(self.other_live_clk, 1, 1)
-        live_layout.addWidget(label("SYNC IN", "FieldLabel"), 2, 0)
-        live_layout.addWidget(self.other_live_sync, 2, 1)
-        live_layout.setColumnStretch(1, 1)
-
-        # Live parameter is intentionally not exposed as an Other radio option.
-        # Its values are still used internally by the Monitor live strip.
-
-        # PAGE 2 — FREQUENCY LIMIT
-        # ============================================================
-
-        frequency_page = QWidget()
-
-        frequency_layout = QHBoxLayout(
-            frequency_page
-        )
-
-        frequency_layout.setContentsMargins(6, 3, 6, 3)
-
-        frequency_layout.setSpacing(
-            10
-        )
-
-        frequency_layout.addWidget(
-            label(
-                "Frequency limit",
-                None,
-                bold=True,
-                color=DEEP
-            )
-        )
-
-        frequency_layout.addWidget(
-            label(
-                "Limit:",
-                "FieldLabel"
-            )
+        limit_grid.addWidget(
+            label("Maximum frequency", "FieldLabel", True),
+            0, 0
         )
 
         self.frequency_limit_value = QDoubleSpinBox()
+        self.frequency_limit_value.setRange(0.00000001, 20.0)
+        self.frequency_limit_value.setDecimals(6)
+        self.frequency_limit_value.setValue(20.0)
+        self.frequency_limit_value.setMinimumHeight(30)
+        limit_grid.addWidget(self.frequency_limit_value, 0, 1)
 
-        # Frequency limit is expressed in MHz and cannot exceed
-        # the TG10 output-frequency maximum of 20 MHz.
-        self.frequency_limit_value.setRange(
-            0.00000001,
-            20.0
+        limit_unit = combo(["MHz", "kHz", "Hz"], 62)
+        limit_grid.addWidget(limit_unit, 0, 2)
+
+        apply_limit = QPushButton("Apply")
+        apply_limit.setObjectName("SmallBtn")
+        apply_limit.clicked.connect(
+            lambda: self.set_status("Frequency limit updated")
         )
+        limit_grid.addWidget(apply_limit, 0, 3)
+        limit_grid.setColumnStretch(1, 1)
 
-        self.frequency_limit_value.setDecimals(
-            3
-        )
+        root.addWidget(limit_box)
 
-        self.frequency_limit_value.setValue(
-            20.000
-        )
+        bottom = QHBoxLayout()
+        bottom.addStretch()
+        close_btn = QPushButton("Close")
+        close_btn.setObjectName("SmallBtn")
+        close_btn.clicked.connect(dialog.accept)
+        bottom.addWidget(close_btn)
+        root.addLayout(bottom)
 
-        frequency_layout.addWidget(
-            self.frequency_limit_value
-        )
-
-        frequency_layout.addWidget(
-            label(
-                "MHz",
-                "FieldLabel"
-            )
-        )
-
-        self.frequency_limit_enable = QCheckBox(
-            "Enable frequency limit"
-        )
-
-        frequency_layout.addWidget(
-            self.frequency_limit_enable
-        )
-
-        frequency_layout.addStretch()
-
-        frequency_apply = QPushButton(
-            "Apply"
-        )
-
-        frequency_apply.setObjectName(
-            "SmallBtn"
-        )
-
-        frequency_apply.clicked.connect(
-            lambda:
-            self.set_status(
-                "Frequency limit updated"
-            )
-        )
-
-        frequency_layout.addWidget(
-            frequency_apply
-        )
-
-        self.other_stack.addWidget(
-            frequency_page
-        )
-
-        # ============================================================
-        # PAGE 3 — DEVICE PRESETS
-        # ============================================================
-
-        device_page = QWidget()
-
-        # Keep the exact height/space allocated to the Other section.
-        # Only the contents inside Device presets are made compact,
-        # matching the small hardcoded preset labels shown on the TG10 LCD.
-        device_layout = QHBoxLayout(
-            device_page
-        )
-
-        device_layout.setContentsMargins(
-            10, 6, 10, 6
-        )
-
-        device_layout.setSpacing(
-            6
-        )
-
-        device_layout.addWidget(
-            label(
-                "Device presets",
-                None,
-                bold=True,
-                color=DEEP,
-                size=11
-            )
-        )
-
-        # Hardcoded TG10 external-device presets.
-        # These are display selections only; no undocumented CAN command
-        # is generated or assumed here.
-        preset_texts = [
-            "1 channel - Pockels cell driver - OUT0-X1",
-            "2 channel - Pockels cell driver - OUT0-X1  OUT2-X2",
-            "4 channel - Pockels cell driver - OUT0-X1  OUT2-X2 - OUT3-X3  OUT4-X4"
-        ]
-
-        for text_value in preset_texts:
-            preset_label = QLabel(text_value)
-            preset_label.setAlignment(
-                Qt.AlignCenter
-            )
-            preset_label.setWordWrap(True)
-            preset_label.setMinimumHeight(42)
-            preset_label.setStyleSheet("""
-                QLabel {
-                    background: #f7fafc;
-                    border: 1px solid #b9cddd;
-                    border-radius: 4px;
-                    color: #173f67;
-                    font-size: 10px;
-                    font-weight: 600;
-                    padding: 6px 8px;
-                }
-            """)
-            preset_label.setSizePolicy(
-                QSizePolicy.Expanding,
-                QSizePolicy.Expanding
-            )
-            device_layout.addWidget(
-                preset_label,
-                1
-            )
-
-        set_preset = QPushButton(
-            "Set"
-        )
-        set_preset.setObjectName(
-            "SmallBtn"
-        )
-        set_preset.setFixedWidth(
-            45
-        )
-        set_preset.setFixedHeight(
-            27
-        )
-        set_preset.setStyleSheet("""
-            QPushButton#SmallBtn {
-                font-size: 10px;
-                padding: 2px 5px;
-                min-height: 23px;
-            }
-        """)
-        set_preset.clicked.connect(
-            lambda:
-            self.set_status(
-                "Device preset selected"
-            )
-        )
-
-        device_layout.addWidget(
-            set_preset
-        )
-
-        self.other_stack.addWidget(
-            device_page
-        )
-
-        # ============================================================
-        # PAGE 4 — SOUND
-        # ============================================================
-
-        sound_page = QWidget()
-
-        sound_layout = QHBoxLayout(
-            sound_page
-        )
-
-        sound_layout.setContentsMargins(6, 3, 6, 3)
-
-        sound_layout.setSpacing(
-            12
-        )
-
-        sound_layout.addWidget(
-            label(
-                "Sound",
-                None,
-                bold=True,
-                color=DEEP
-            )
-        )
-
-        self.sound_enable = QCheckBox(
-            "Enable sound"
-        )
-
-        self.sound_enable.setChecked(
-            True
-        )
-
-        sound_layout.addWidget(
-            self.sound_enable
-        )
-
-        sound_layout.addWidget(
-            label(
-                "Volume:",
-                "FieldLabel"
-            )
-        )
-
-        self.sound_volume = QSpinBox()
-
-        self.sound_volume.setRange(
-            0,
-            100
-        )
-
-        self.sound_volume.setValue(
-            70
-        )
-
-        self.sound_volume.setSuffix(
-            " %"
-        )
-
-        sound_layout.addWidget(
-            self.sound_volume
-        )
-
-        sound_layout.addStretch()
-
-        self.other_stack.addWidget(
-            sound_page
-        )
-
-        # ============================================================
-        # PAGE 5 — INFO
-        # ============================================================
-
-        info_page = QWidget()
-
-        info_layout = QHBoxLayout(
-            info_page
-        )
-
-        info_layout.setContentsMargins(6, 3, 6, 3)
-
-        info_layout.setSpacing(
-            25
-        )
-
-        info_layout.addWidget(
-            label(
-                "TG10 Timing Generator",
-                None,
-                bold=True,
-                color=DEEP
-            )
-        )
-
-        info_layout.addWidget(
-            label(
-                "C-DAC TG10 Control GUI"
-            )
-        )
-
-        info_layout.addWidget(
-            label(
-                "GUI Version: 1.0"
-            )
-        )
-
-        info_layout.addWidget(
-            label(
-                "Hardware: EKSMA Optics TG10"
-            )
-        )
-
-        info_layout.addStretch()
-
-        self.other_stack.addWidget(
-            info_page
-        )
-
-        # ============================================================
-        # ADD STACK
-        # ============================================================
-
-        body.addWidget(
-            self.other_stack,
-            1
-        )
-
-        # ============================================================
-        # BUTTON → PAGE CONNECTION
-        # ============================================================
-
-        self.other_group.idClicked.connect(
-            self.other_stack.setCurrentIndex
-        )
-
-        return frame
-
+        dialog.exec()
 
     def _force_push_trigger(self, trigger_name):
         # GUI/front-end action only. TG10 CAN protocol is proprietary and no
@@ -3840,13 +5066,8 @@ class TG10Window(QMainWindow):
             "StatusBar"
         )
 
-        w.setMinimumHeight(
-            26
-        )
-
-        w.setMaximumHeight(
-            26
-        )
+        w.setMinimumHeight(26)
+        w.setMaximumHeight(26)
 
         h = QHBoxLayout(w)
 
@@ -3854,8 +5075,13 @@ class TG10Window(QMainWindow):
             12, 0, 12, 0
         )
 
-        self.status = label(
-            "Ready   |   Not connected",
+        h.setSpacing(6)
+
+        self.status = QLabel(
+            "Ready   |   Not connected"
+        )
+
+        self.status.setObjectName(
             "StatusText"
         )
 
@@ -3865,22 +5091,16 @@ class TG10Window(QMainWindow):
 
         h.addStretch()
 
-        h.addWidget(
-            label(
-                "C-DAC",
-                "StatusRight"
-            )
+        right = QLabel(
+            "C-DAC    TG10 GUI v1.0"
         )
 
-        h.addSpacing(
-            12
+        right.setObjectName(
+            "StatusRight"
         )
 
         h.addWidget(
-            label(
-                "TG10 GUI v1.0",
-                "StatusRight"
-            )
+            right
         )
 
         return w
@@ -3889,8 +5109,29 @@ class TG10Window(QMainWindow):
     # USB-CAN / BACKEND CONNECTION
     # ========================================================
 
+    def _request_disconnect(self):
+        """Ask for confirmation before intentionally disconnecting TG10."""
+        if not self.connection_state:
+            return
+
+        answer = QMessageBox.question(
+            self,
+            "Disconnect TG10",
+            "Are you sure you want to disconnect?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+
+        if answer == QMessageBox.Yes:
+            self._close_can_connection()
+            self.set_status("Disconnected from TG10")
+
     def _close_can_connection(self):
         """Close the current USB-CAN serial connection, if one exists."""
+
+        # Stop the invisible inactivity refresh immediately when disconnected.
+        self._stop_monitor_inactivity_refresh()
+
         if self.serial_connection is not None:
             try:
                 if self.serial_connection.is_open:
@@ -3900,7 +5141,11 @@ class TG10Window(QMainWindow):
 
         self.serial_connection = None
         self.connection_state = False
+        self.monitor_backend = None
         self.connection.setText("●  DISCONNECTED")
+        self.connection.setToolTip("Connect or select a COM port using COM")
+        if hasattr(self, "connection"):
+            self.connection.setEnabled(False)
 
     def _connect_can_backend(self):
         """
@@ -3926,11 +5171,19 @@ class TG10Window(QMainWindow):
         try:
             # Lazy imports keep the GUI start-up independent of the hardware
             # backend. These are the existing project backend modules.
-            import Sy4000_can_control_org as can_backend
-            import readv1 as can_reader
+            import main as can_backend
+            import monitor02 as can_reader
+            import monitor02 as monitor_backend
+            import operations02 as operations
+            import calculations02_ as calculations
+            import menu02_ as menu
 
             self.can_backend = can_backend
             self.can_reader = can_reader
+            self.monitor_backend = monitor_backend
+            self.calculations = calculations
+            self.operations = operations
+            self.menu = menu
 
             # Use the backend's existing serial settings. The COM number
             # comes ONLY from the GUI selection.
@@ -3940,9 +5193,10 @@ class TG10Window(QMainWindow):
                 timeout=can_backend.TIMEOUT
             )
 
-            # READ-ONLY hardware test: register 0x52 is already used by the
-            # existing TG10 backend for MuxConfSw / Config mode.
-            config_value = can_reader._rd(
+            # READ-ONLY hardware test using the SAME transport used by
+            # monitor02.py. This avoids mixing the old readv1 transport
+            # with the test01 Monitor backend.
+            config_value = monitor_backend._rd(
                 self.serial_connection,
                 0x52,
                 wait=0.5
@@ -3952,9 +5206,19 @@ class TG10Window(QMainWindow):
             self.connection.setText(
                 f"●  CONNECTED — {port}"
             )
+            self.connection.setToolTip(
+                "Click here to disconnect from the TG10 USB-CAN device"
+            )
+            if hasattr(self, "connection"):
+                self.connection.setEnabled(True)
             self.set_status(
                 f"Connected to TG10 on {port} | Read 0x52 = 0x{config_value:02X}"
             )
+
+            # Start the invisible 10-second inactivity countdown.
+            # No immediate automatic read is performed here; the first
+            # automatic read occurs only after 10 seconds without user input.
+            self._start_monitor_inactivity_refresh()
 
             return True
 
@@ -3962,6 +5226,9 @@ class TG10Window(QMainWindow):
             self._close_can_connection()
             self.can_backend = None
             self.can_reader = None
+            self.monitor_backend = None
+            self.calculations = None
+            self.connection_state = False
 
             self.set_status(
                 f"Connection failed on {port}"
@@ -3998,11 +5265,13 @@ class TG10Window(QMainWindow):
 
     def open_delay(self):
 
-        dialog = DelayDialog(
-            self
-        )
+        if not hasattr(self, "delay_dialog"):
 
-        dialog.exec()
+            self.delay_dialog = DelayDialog(
+                self
+            )
+
+        self.delay_dialog.exec()
 
     def open_presets(self):
 
@@ -4013,45 +5282,78 @@ class TG10Window(QMainWindow):
         dialog.exec()
 
     def toggle_run(self):
+        try:
+            if not self.connection_state or self.serial_connection is None:
+                QMessageBox.warning(
+                    self,
+                    "TG10 RUN / STOP",
+                    "TG10 is not connected. Open COM and connect first."
+                )
+                return
 
-        self.running = not self.running
+            if not self.running:
+                # RUN
+                sequence = self.operations.seq_run_on()
+                label = "RUN_ON"
+            else:
+                # STOP
+                sequence = self.operations.seq_run_off()
+                label = "RUN_OFF"
 
-        if self.running:
-
-            self.run_button.setText(
-                "■  STOP"
+            # Use the existing CAN backend function.
+            self.can_backend.send_sequence(
+                self.serial_connection,
+                sequence,
+                label=label
             )
 
-            self.run_button.setStyleSheet(
-                f"""
-                QPushButton#RunBtn {{
-                    background:{RED};
-                    border:1px solid {RED};
-                    color:white;
-                    font-weight:700;
-                    min-height:40px;
-                    padding:5px 22px;
-                    border-radius:3px;
-                }}
-                """
-            )
+            # Change GUI state only after hardware command succeeds.
+            self.running = not self.running
 
-            self.set_status("RUN active")
+            if self.running:
+                # TG10 is RUNNING → show STOP in RED
+                self.run_button.setText("■  STOP")
+                self.run_button.setStyleSheet(
+                    """
+                    QPushButton#RunBtn {
+                        background:#d32f2f;
+                        border:1px solid #d32f2f;
+                        color:white;
+                        font-weight:700;
+                        min-height:40px;
+                        padding:5px 22px;
+                        border-radius:3px;
+                    }
+                    """
+                )
+                self.set_status("RUN active")
+
+            else:
+                # TG10 is STOPPED → show RUN in GREEN
+                self.run_button.setText("▶  RUN")
+                self.run_button.setStyleSheet(
+                    """
+                    QPushButton#RunBtn {
+                        background:#159447;
+                        border:1px solid #159447;
+                        color:white;
+                        font-weight:700;
+                        min-height:40px;
+                        padding:5px 22px;
+                        border-radius:3px;
+                    }
+                    """
+                )
+                self.set_status("RUN stopped")
+
             self._update_monitor_values()
 
-        else:
-
-            self.run_button.setText(
-                "▶  RUN"
+        except Exception as exc:
+            QMessageBox.critical(
+                self,
+                "TG10 RUN / STOP Failed",
+                f"Could not change RUN/STOP state:\n{exc}"
             )
-
-            self.run_button.setStyleSheet(
-                ""
-            )
-
-            self.set_status("RUN stopped")
-            self._update_monitor_values()
-
     def set_status(self, text):
 
         if self.connection_state and self.selected_com_port:
@@ -4067,6 +5369,19 @@ class TG10Window(QMainWindow):
 
     def closeEvent(self, event):
         """Close the serial port cleanly when the GUI exits."""
+        app = QApplication.instance()
+        if app is not None:
+            app.removeEventFilter(self)
+
+        self._stop_monitor_inactivity_refresh()
+
+        if (
+            self.monitor_refresh_thread is not None
+            and self.monitor_refresh_thread.isRunning()
+        ):
+            self.monitor_refresh_thread.quit()
+            self.monitor_refresh_thread.wait(1500)
+
         self._close_can_connection()
         event.accept()
 

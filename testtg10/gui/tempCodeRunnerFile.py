@@ -1,10 +1,15 @@
-"""
-# TG10 TIMING GENERATOR - C-DAC
-# PySide6 dashboard GUI
+    def finish_activity(self, text):
 
-# Run:
-#     python main.py
+        """
+        Hide the progress indicator after the operation completes.
+        """
 
-# Requirement:
-#     pip install PySide6 pyserial
-# """
+        self.activity_status.setText(
+            text
+        )
+
+        self.activity_progress.setValue(
+            100
+        )
+
+        self.activity_progress.hide()
