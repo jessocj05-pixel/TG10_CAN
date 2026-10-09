@@ -1871,30 +1871,52 @@ class DelayDialog(QDialog):
 
                 parent.menu.update_current_config(sequence)
 
-                # ------------------------------------------------
-                # READ ACTUAL DELAY FROM TG10
-                # Use the SAME function used by Monitor
-                # ------------------------------------------------
+                # # ------------------------------------------------
+                # # READ ACTUAL DELAY FROM TG10
+                # # Use the SAME function used by Monitor
+                # # ------------------------------------------------
 
-                actual_time_s = parent.monitor_backend._delay_seconds(
-                    parent.serial_connection,
-                    ch,
-                    f_hz
-                )
+                # actual_time_s = parent.monitor_backend._delay_seconds(
+                #     parent.serial_connection,
+                #     ch,
+                #     f_hz
+                # )
 
-                # ------------------------------------------------
-                # Convert actual hardware value to the
-                # currently selected GUI unit
-                # ------------------------------------------------
+                # # ------------------------------------------------
+                # # Convert actual hardware value to the
+                # # currently selected GUI unit
+                # # ------------------------------------------------
 
+                # actual_value = (
+                #     actual_time_s
+                #     / self.UNIT_TO_SECONDS[selected_unit]
+                # )
+
+                # # ------------------------------------------------
+                # # Update dialog field
+                # # ------------------------------------------------
+
+                # field.blockSignals(True)
+                # field.setValue(actual_value)
+                # field.blockSignals(False)
+            
+            # Read all DEL0–DEL7 values once after programming all channels.
+            readback = parent.monitor_backend.read_all_delays(
+                parent.serial_connection,
+                channels=range(8),
+                show=False
+            )
+
+            # Mirror the actual hardware values into the existing GUI fields.
+            for ch in range(8):
+                field = self.delay_fields[ch]
+                unit = self.delay_units[ch].currentText()
+
+                actual_time_s = readback[ch]["delay_seconds"]
                 actual_value = (
                     actual_time_s
-                    / self.UNIT_TO_SECONDS[selected_unit]
+                    / self.UNIT_TO_SECONDS[unit]
                 )
-
-                # ------------------------------------------------
-                # Update dialog field
-                # ------------------------------------------------
 
                 field.blockSignals(True)
                 field.setValue(actual_value)
@@ -1920,26 +1942,39 @@ class DelayDialog(QDialog):
 
     def apply_post_delay_presets(self):
 
-        parent = self.parent()
+        # parent = self.parent()
+
+        # if parent is None:
+        #     return
+        
+        parent = self.parent_window
 
         if parent is None:
+            QMessageBox.warning(
+                self,
+                "Post-delay Presets",
+                "The TG10 main window is unavailable."
+            )
             return
 
         # ----------------------------------------------------
         # Check connection
         # ----------------------------------------------------
-        if not getattr(parent, "connection_state", False):
-            QMessageBox.warning(
-                self,
-                "Not Connected",
-                "Please connect to TG10 before setting Post-delay presets."
-            )
+        if not self.check_connection():
             return
 
         # ----------------------------------------------------
         # Get system clock
         # ----------------------------------------------------
-        f_hz = parent.get_system_clock_hz()
+        try:
+            f_hz = parent.get_system_clock_hz()
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Post-delay Error",
+                f"Could not determine the TG10 system clock:\n\n{e}"
+            )
+            return
 
         # ----------------------------------------------------
         # Apply each Post-delay channel
@@ -3783,11 +3818,30 @@ class TG10Window(QMainWindow):
 
                 logic_mux = logic_map[logic_text]
 
-            # 6. Build the sequence using the existing operations module.
+            
+            # 6. Validate the values before passing them to the
+            # existing TG10 output sequence builder.
             if not hasattr(self, "operations"):
                 raise RuntimeError(
                     "The existing TG10 operations module is unavailable."
                 )
+
+            for name, value in (
+                ("Config 1 rise", set1_src),
+                ("Config 1 fall", res1_src),
+                ("Config 2 rise", set2_src),
+                ("Config 2 fall", res2_src),
+            ):
+                if not isinstance(value, int) or not 0 <= value <= 15:
+                    raise ValueError(
+                        f"{name} has an invalid condition value: {value}"
+                    )
+
+            if logic_mux is not None and not 0 <= logic_mux <= 3:
+                raise ValueError(
+                    f"Invalid output logic value: {logic_mux}"
+                )
+
 
             sequence = self.operations.seq_out_config_del(
                 channel,
@@ -4116,10 +4170,7 @@ class TG10Window(QMainWindow):
 
         add_card_action(
             frame,
-            lambda: (
-                self._commit_config_to_monitor(),
-                self.set_status(f'Config 1/2 set: {self.config_settings["Config 1"]["mode"]}')
-            ),
+            self._set_config_hardware,
             "Set",
         )
 
@@ -4188,6 +4239,112 @@ class TG10Window(QMainWindow):
                 widget.deleteLater()
             elif item.layout() is not None:
                 self._clear_config_layout(item.layout())
+                
+    
+    def _apply_config_readback_to_card(self, config_data):
+        """Mirror valid TG10 configuration readback into the existing card."""
+        if not isinstance(config_data, dict):
+            return
+
+        conf_raw = config_data.get("conf_raw")
+        hardware_mode = config_data.get("mode")
+
+        # Do not change the card for an unknown or unrecognized register value.
+        mode_map = {
+            "NORMAL": "Normal",
+            "GATE": "Gate",
+            "BURST": "Burst",
+            "nBURST": "Burst",
+            "FREQ_DIV": "Frequency divider",
+        }
+
+        gui_mode = mode_map.get(hardware_mode)
+
+        if gui_mode is None:
+            # conf_raw == 0 is reported as the TG10's fixed/idle configuration.
+            # It does not identify one of the four editable GUI modes.
+            return
+
+        settings = self.config_settings[self.active_config_name]
+        settings["mode"] = gui_mode
+
+        trigger = config_data.get("trigger")
+        count = config_data.get("count")
+
+        if gui_mode == "Gate" and trigger in ("GATE", "nGATE"):
+            settings["gate"] = trigger
+
+        elif gui_mode == "Burst":
+            trigger_map = {
+                "SYNCIN": "SYNC IN",
+                "GATE": "GATE",
+                "nGATE": "nGATE",
+                "Software": "Software",
+            }
+
+            if trigger in trigger_map:
+                settings["burst_source"] = trigger_map[trigger]
+
+            if count is not None:
+                settings["burst_count"] = max(1, min(65535, int(count)))
+
+        elif gui_mode == "Frequency divider" and count is not None:
+            settings["divider"] = max(1, min(32767, int(count)))
+
+        # Update controls with their signals blocked so readback does not
+        # accidentally trigger configuration writes or overwrite stored values.
+        for name, radio in self.config_mode_buttons.items():
+            radio.blockSignals(True)
+            radio.setAutoExclusive(False)
+            radio.setChecked(name == gui_mode)
+            radio.setAutoExclusive(True)
+            radio.blockSignals(False)
+
+        if gui_mode == "Gate":
+            selected_gate = self.config_gate_buttons.get(
+                settings.get("gate", "GATE")
+            )
+            if selected_gate is not None:
+                for radio in self.config_gate_group.buttons():
+                    radio.blockSignals(True)
+                    radio.setAutoExclusive(False)
+                    radio.setChecked(radio is selected_gate)
+                    radio.setAutoExclusive(True)
+                    radio.blockSignals(False)
+
+        if gui_mode == "Burst":
+            selected_source = self.config_burst_buttons.get(
+                settings.get("burst_source", "SYNC IN")
+            )
+            if selected_source is not None:
+                for radio in self.config_burst_group.buttons():
+                    radio.blockSignals(True)
+                    radio.setAutoExclusive(False)
+                    radio.setChecked(radio is selected_source)
+                    radio.setAutoExclusive(True)
+                    radio.blockSignals(False)
+
+            self.burst_count_widget.blockSignals(True)
+            self.burst_count_widget.setValue(
+                int(settings.get("burst_count", 1))
+            )
+            self.burst_count_widget.blockSignals(False)
+
+        if gui_mode == "Frequency divider":
+            self.config_divider_widget.blockSignals(True)
+            self.config_divider_widget.setValue(
+                int(settings.get("divider", 1))
+            )
+            self.config_divider_widget.blockSignals(False)
+
+        # Reuse the existing mode handler to restore the correct enabled
+        # controls and sub-options. Restore the hardware-read values afterward,
+        # because that handler updates the settings dictionary.
+        saved_settings = dict(settings)
+        self._configuration_mode_changed(gui_mode)
+        self.config_settings[self.active_config_name].update(saved_settings)
+
+
 
     def _configuration_mode_changed(self, mode):
         """Enable only the controls belonging to the selected TG10 mode.
@@ -4294,7 +4451,251 @@ class TG10Window(QMainWindow):
         divider_enabled = mode == "Frequency divider"
         if hasattr(self, "config_divider_widget"):
             self.config_divider_widget.setEnabled(divider_enabled)
+            
+    
+    # def _set_config_hardware(self):
+    #     """Apply the selected Configuration 1/2 mode using existing sequences."""
 
+    #     if not self.connection_state or self.serial_connection is None:
+    #         QMessageBox.warning(
+    #             self,
+    #             "TG10 Not Connected",
+    #             "Connect to the TG10 before applying configuration settings."
+    #         )
+    #         return
+
+    #     try:
+    #         settings = self.config_settings[self.active_config_name]
+    #         mode = settings["mode"]
+
+    #         if mode == "Normal":
+    #             sequence = self.operations.seq_config_normal()
+
+    #         elif mode == "Gate":
+    #             gate_mode = settings.get("gate", "GATE")
+
+    #             if gate_mode == "GATE":
+    #                 sequence = self.operations.seq_config_gate()
+    #             elif gate_mode == "nGATE":
+    #                 sequence = self.operations.seq_config_ngate()
+    #             else:
+    #                 raise ValueError(f"Unsupported Gate selection: {gate_mode}")
+
+    #         elif mode == "Burst":
+    #             burst_sources = {
+    #                 "SYNC IN": 0,
+    #                 "GATE": 1,
+    #                 "nGATE": 2,
+    #                 "Software": 3,
+    #             }
+
+    #             source_name = settings.get("burst_source", "SYNC IN")
+    #             if source_name not in burst_sources:
+    #                 raise ValueError(
+    #                     f"Unsupported Burst trigger source: {source_name}"
+    #                 )
+
+    #             sequence = self.operations.seq_config_burst(
+    #                 burst_trig_src=burst_sources[source_name],
+    #                 burst_count=int(settings.get("burst_count", 1)),
+    #                 f_div=int(settings.get("divider", 1)),
+    #             )
+
+    #         elif mode == "Frequency divider":
+    #             sequence = self.operations.seq_config_freq_div(
+    #                 f_div=int(settings.get("divider", 1))
+    #             )
+
+    #         else:
+    #             raise ValueError(f"Unsupported configuration mode: {mode}")
+
+    #         self.set_status(f"Applying {mode} configuration...")
+    #         QApplication.processEvents()
+
+    #         self.can_backend.send_sequence(
+    #             self.serial_connection,
+    #             sequence,
+    #             label=f"TG10 {self.active_config_name} - {mode}",
+    #         )
+
+    #         self._commit_config_to_monitor()
+    #         self.set_status(
+    #             f"{self.active_config_name} - {mode} configuration sent."
+    #         )
+
+    #     except Exception as exc:
+    #         self.set_status("Configuration application failed.")
+    #         QMessageBox.critical(
+    #             self,
+    #             "TG10 Configuration Error",
+    #             f"Could not apply configuration settings:\n\n{exc}",
+    #         )
+
+    
+    # def _set_config_hardware(self):
+    #     """Apply the selected Configuration mode to the connected TG10."""
+    #     if (
+    #         not self.connection_state
+    #         or self.serial_connection is None
+    #     ):
+    #         QMessageBox.warning(
+    #             self,
+    #             "TG10 Not Connected",
+    #             "Connect to the TG10 before applying configuration settings."
+    #         )
+    #         return
+
+    #     if self.can_backend is None or self.operations is None:
+    #         QMessageBox.critical(
+    #             self,
+    #             "TG10 Configuration Error",
+    #             "The CAN backend or operations module is not loaded."
+    #         )
+    #         return
+
+    #     try:
+    #         settings = self.config_settings[self.active_config_name]
+    #         mode = settings["mode"]
+
+    #         if mode == "Normal":
+    #             sequence = self.operations.seq_config_normal()
+
+    #         elif mode == "Gate":
+    #             gate_mode = settings.get("gate", "GATE")
+
+    #             if gate_mode == "GATE":
+    #                 sequence = self.operations.seq_config_gate()
+    #             elif gate_mode == "nGATE":
+    #                 sequence = self.operations.seq_config_ngate()
+    #             else:
+    #                 raise ValueError(
+    #                     f"Unsupported Gate selection: {gate_mode}"
+    #                 )
+
+    #         elif mode == "Burst":
+    #             burst_sources = {
+    #                 "SYNC IN": 0,
+    #                 "GATE": 1,
+    #                 "nGATE": 2,
+    #                 "Software": 3,
+    #             }
+
+    #             source_name = settings.get("burst_source", "SYNC IN")
+
+    #             if source_name not in burst_sources:
+    #                 raise ValueError(
+    #                     f"Unsupported Burst trigger: {source_name}"
+    #                 )
+
+    #             sequence = self.operations.seq_config_burst(
+    #                 burst_trig_src=burst_sources[source_name],
+    #                 burst_count=int(settings.get("burst_count", 1)),
+    #                 f_div=int(settings.get("divider", 1)),
+    #             )
+
+    #         elif mode == "Frequency divider":
+    #             sequence = self.operations.seq_config_freq_div(
+    #                 f_div=int(settings.get("divider", 1))
+    #             )
+
+    #         else:
+    #             raise ValueError(
+    #                 f"Unsupported configuration mode: {mode}"
+    #             )
+
+    #         self.set_status(f"Applying {mode} configuration...")
+    #         QApplication.processEvents()
+
+    #         self.can_backend.send_sequence(
+    #             self.serial_connection,
+    #             sequence,
+    #             label=f"TG10 {self.active_config_name} - {mode}"
+    #         )
+
+    #         self.committed_config_name = self.active_config_name
+
+    #         self.set_status(
+    #             f"{self.active_config_name} - {mode} configuration sent."
+    #         )
+
+    #         # Read back the hardware after the write completes.
+    #         self._update_monitor_values()
+
+    #     except Exception as exc:
+    #         self.set_status("Configuration application failed.")
+
+    #         QMessageBox.critical(
+    #             self,
+    #             "TG10 Configuration Error",
+    #             f"Could not apply configuration settings:\n\n{exc}"
+    #         )
+
+    
+    def _set_config_hardware(self):
+        """Send the selected configuration using existing operation builders."""
+        if not self.connection_state or self.serial_connection is None:
+            QMessageBox.warning(
+                self,
+                "TG10 Not Connected",
+                "Connect to the TG10 before applying configuration settings."
+            )
+            return
+
+        try:
+            settings = self.config_settings[self.active_config_name]
+            mode = settings["mode"]
+
+            if mode == "Normal":
+                sequence = self.operations.seq_config_normal()
+
+            elif mode == "Gate":
+                if settings.get("gate", "GATE") == "GATE":
+                    sequence = self.operations.seq_config_gate()
+                else:
+                    sequence = self.operations.seq_config_ngate()
+
+            elif mode == "Burst":
+                source_map = {
+                    "SYNC IN": 0,
+                    "GATE": 1,
+                    "nGATE": 2,
+                    "Software": 3,
+                }
+                source = settings.get("burst_source", "SYNC IN")
+
+                sequence = self.operations.seq_config_burst(
+                    burst_trig_src=source_map[source],
+                    burst_count=int(settings.get("burst_count", 1)),
+                    f_div=int(settings.get("divider", 1)),
+                )
+
+            elif mode == "Frequency divider":
+                sequence = self.operations.seq_config_freq_div(
+                    f_div=int(settings.get("divider", 1))
+                )
+
+            else:
+                raise ValueError(f"Unsupported configuration mode: {mode}")
+
+            self.can_backend.send_sequence(
+                self.serial_connection,
+                sequence,
+                label=f"TG10 {self.active_config_name} - {mode}"
+            )
+
+            self.committed_config_name = self.active_config_name
+            self.set_status(f"{self.active_config_name}: {mode} settings sent.")
+
+        except Exception as exc:
+            self.set_status("Configuration application failed.")
+            QMessageBox.critical(
+                self,
+                "TG10 Configuration Error",
+                f"Could not apply configuration:\n{exc}"
+            )
+
+
+    
     def _commit_config_to_monitor(self):
         self.committed_config_name = self.active_config_name
         self._update_monitor_values()
@@ -4479,10 +4880,8 @@ class TG10Window(QMainWindow):
 
         add_card_action(
             frame,
-            lambda: (
-                self._commit_output_to_monitor(),
-                self.set_status(f"{self.output_channel.currentText()} output set")
-            )
+            self._set_output_hardware,
+            "Set",
         )
         return frame
 
@@ -5146,6 +5545,7 @@ class TG10Window(QMainWindow):
 
         result = {
             "status": None,
+            "status_error": None,
             "run_status": None,
             "live": None,
             "config": None,
@@ -5157,10 +5557,16 @@ class TG10Window(QMainWindow):
         }
 
         # Existing backend read: status / sync / output frequency / period.
-        result["status"] = monitor.read_status(
-            ser,
-            show=False
-        )
+        
+        # Existing backend read: status / sync / output frequency / period.
+        try:
+            result["status"] = monitor.read_status(
+                ser,
+                show=False
+            )
+        except Exception as exc:
+            result["status_error"] = str(exc)
+
 
         # Existing backend read: device run status.
         try:
@@ -5201,10 +5607,22 @@ class TG10Window(QMainWindow):
 
     def _apply_monitor_hardware_data(self, data):
         """Apply completed hardware readback to Qt widgets on the GUI thread."""
+        
         monitor = self.monitor_backend
 
-        status = data["status"]
-        mode = status.get("mode")
+        status = data.get("status")
+
+        if status is None:
+            print(
+                f"[MONITOR] Status read failed: "
+                f"{data.get('status_error', 'Unknown error')}"
+            )
+            self.monitor_sync_value.setText("--")
+            self.monitor_freq_value.setText("--")
+            self.monitor_period_value.setText("--")
+        else:
+            mode = status.get("mode")
+
 
         self.monitor_sync_value.setText(
             self._monitor_mode_text(mode)
@@ -5349,6 +5767,13 @@ class TG10Window(QMainWindow):
             return "Monitor refreshed; partial read: " + ", ".join(errors)
 
         return "Monitor refreshed from TG10 hardware"
+    
+    
+        # Mirror the configuration read from the TG10 into the Configuration card.
+        config_data = data.get("config")
+        if config_data is not None:
+            self._apply_config_readback_to_card(config_data)
+
 
     # ========================================================
     # BUILT-IN 10-SECOND INACTIVITY MONITOR REFRESH

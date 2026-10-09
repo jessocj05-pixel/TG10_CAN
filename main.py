@@ -2895,6 +2895,7 @@ class TG10Window(QMainWindow):
         self._update_output_logic_options()
         self._update_output_condition_controls()
 
+        
         add_card_action(
             frame,
             lambda: (
@@ -2902,6 +2903,7 @@ class TG10Window(QMainWindow):
                 self.set_status(f"{self.output_channel.currentText()} output set")
             )
         )
+
         return frame
 
     @staticmethod
