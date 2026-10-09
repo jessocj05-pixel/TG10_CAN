@@ -2515,8 +2515,27 @@ class TG10Window(QMainWindow):
         middle_layout.setContentsMargins(0, 0, 0, 0)
         middle_layout.setSpacing(8)
         #config.setMinimumHeight(sync.sizeHint().height())
-        middle_layout.addWidget(freq, 1)
+        #middle_layout.addWidget(freq, 2)
+        #middle_layout.addWidget(config, 5)
+        
+        # MIDDLE: compact Frequency / Period, taller Configuration 1/2.
+        freq.setMinimumHeight(200)
+        freq.setMaximumHeight(1000)
+        freq.setSizePolicy(
+            QSizePolicy.Expanding,
+            QSizePolicy.Fixed
+        )
+
+        config.setMinimumHeight(200)
+        config.setMaximumHeight(15777215)
+        config.setSizePolicy(
+            QSizePolicy.Expanding,
+            QSizePolicy.Expanding
+        )
+
+        middle_layout.addWidget(freq, 0)
         middle_layout.addWidget(config, 1)
+
 
         grid.addWidget(left_column, 0, 0, 2, 1)
         grid.addWidget(middle_column, 0, 1, 2, 1)
@@ -2679,29 +2698,33 @@ class TG10Window(QMainWindow):
             self.single_source_clk_radio, 1
         )
 
+        
         single_layout.addWidget(
             self.single_source_sync_radio, 0, 1
         )
+
+        # Exchange the positions of CLK IN and Rate.
         single_layout.addWidget(
-            self.single_source_clk_radio, 0, 2
+            label("Rate", "FieldLabel", True),
+            0, 2
         )
 
         single_layout.addWidget(
-            label("Rate", "FieldLabel", True),
-            1, 1
+            self.single_source_clk_radio, 1, 1
         )
 
         self.external_rate = QDoubleSpinBox()
         self.external_rate.setDecimals(6)
         self.external_rate.setValue(10.0)
         self.external_rate.setFixedHeight(28)
-        single_layout.addWidget(self.external_rate, 1, 2)
+        single_layout.addWidget(self.external_rate, 0, 3)
 
         self.single_rate_unit = combo(
             ["MHz", "kHz", "Hz"],
             62
         )
-        single_layout.addWidget(self.single_rate_unit, 1, 3)
+        single_layout.addWidget(self.single_rate_unit, 0, 4)
+
 
         body.addWidget(single_box)
 
@@ -3617,7 +3640,198 @@ class TG10Window(QMainWindow):
                 "Frequency / Period Error",
                 str(e)
             )
+    
+    
+    
+    def _set_output_hardware(self):
+        """Apply OUT0–OUT7 settings using the existing TG10 backend."""
 
+        # 1. Verify connection
+        if not getattr(self, "connection_state", False):
+            QMessageBox.warning(
+                self,
+                "TG10 Output",
+                "Connect to TG10 before setting an output."
+            )
+            return
+
+        if (
+            not hasattr(self, "serial_connection")
+            or self.serial_connection is None
+        ):
+            QMessageBox.warning(
+                self,
+                "TG10 Output",
+                "The TG10 connection is unavailable."
+            )
+            return
+
+        try:
+            # 2. This sequence builder configures digital OUT0–OUT7.
+            channel_text = self.output_channel.currentText().strip()
+
+            if not channel_text.startswith("OUT"):
+                QMessageBox.warning(
+                    self,
+                    "TG10 Output",
+                    "Hardware Set is currently implemented for OUT0–OUT7. "
+                    "AN OUT, COM TRIG and PRE TRIG need their own "
+                    "verified hardware sequences."
+                )
+                return
+
+            channel = int(channel_text[3:])
+
+            if not 0 <= channel <= 7:
+                raise ValueError("Output channel must be OUT0–OUT7.")
+
+            # 3. Convert the displayed condition to its TG10 value.
+            # The same numeric code can mean different things depending
+            # on whether the register controls a rising/set or falling/reset
+            # condition. The value 12 and value 15 are handled separately.
+            def condition_value(label, edge):
+                label = label.strip()
+
+                if label == "No change":
+                    return 0
+
+                if label in ("Force set", "Force reset"):
+                    return 1
+
+                if label.startswith("post DEL"):
+                    return 2
+
+                if label.startswith("DEL"):
+                    index = int(label[3:])
+                    if 0 <= index <= 5:
+                        return 3 + index
+                    if index in (6, 7):
+                        return 9 + (index - 6)
+                    raise ValueError(f"Unsupported delay condition: {label}")
+
+                if label == "Trigger":
+                    return 11
+
+                if label in ("Latch set", "Latch reset"):
+                    if edge == "rise":
+                        if label != "Latch set":
+                            raise ValueError(
+                                "Choose 'Latch set' for a rise condition."
+                            )
+                    else:
+                        if label != "Latch reset":
+                            raise ValueError(
+                                "Choose 'Latch reset' for a fall condition."
+                            )
+                    return 12
+
+                if label == "GATE":
+                    return 13
+
+                if label == "nGATE":
+                    return 14
+
+                if label in ("Delayed set", "Delayed reset"):
+                    if edge == "rise":
+                        if label != "Delayed reset":
+                            raise ValueError(
+                                "The TG10 set-condition register uses "
+                                "'Delayed reset' (value 15)."
+                            )
+                    else:
+                        if label != "Delayed set":
+                            raise ValueError(
+                                "The TG10 reset-condition register uses "
+                                "'Delayed set' (value 15)."
+                            )
+                    return 15
+
+                raise ValueError(
+                    f"Unsupported TG10 output condition: {label}"
+                )
+
+            # 4. Read all four selected conditions.
+            set1_src = condition_value(
+                self.output_c1_rise.currentText(), "rise"
+            )
+            res1_src = condition_value(
+                self.output_c1_fall.currentText(), "fall"
+            )
+            set2_src = condition_value(
+                self.output_c2_rise.currentText(), "rise"
+            )
+            res2_src = condition_value(
+                self.output_c2_fall.currentText(), "fall"
+            )
+
+            # 5. Logic mux is available only for OUT2–OUT5.
+            logic_mux = None
+
+            if channel in (2, 3, 4, 5):
+                logic_map = {
+                    "NA": 0,
+                    "AND": 1,
+                    "OR": 2,
+                    "NOT": 3,
+                }
+                logic_text = self.output_logic.currentText().strip()
+
+                if logic_text not in logic_map:
+                    raise ValueError(
+                        f"Unsupported output logic: {logic_text}"
+                    )
+
+                logic_mux = logic_map[logic_text]
+
+            # 6. Build the sequence using the existing operations module.
+            if not hasattr(self, "operations"):
+                raise RuntimeError(
+                    "The existing TG10 operations module is unavailable."
+                )
+
+            sequence = self.operations.seq_out_config_del(
+                channel,
+                set1_src=set1_src,
+                res1_src=res1_src,
+                set2_src=set2_src,
+                res2_src=res2_src,
+                logic_mux=logic_mux,
+                command_on=True,
+            )
+
+            # 7. Send using the existing CAN backend.
+            if not hasattr(self, "can_backend"):
+                raise RuntimeError(
+                    "The existing TG10 CAN backend is unavailable."
+                )
+
+            self.set_status(f"Applying {channel_text} output settings...")
+            QApplication.processEvents()
+
+            self.can_backend.send_sequence(
+                self.serial_connection,
+                sequence,
+                label=f"TG10 {channel_text} Output"
+            )
+
+            # 8. Update Monitor only after send_sequence returns successfully.
+            self._commit_output_to_monitor()
+
+            self.set_status(
+                f"{channel_text} output settings sent to TG10."
+            )
+
+        except Exception as exc:
+            self.set_status("Output configuration failed.")
+
+            QMessageBox.critical(
+                self,
+                "TG10 Output Error",
+                f"Could not apply output settings:\n{exc}"
+            )
+
+
+    
     def _update_frequency_range(self):
         if not hasattr(self,"freq_value"): return
         ranges={"MHz":(1e-8,20.0),"kHz":(1e-5,20000.0),"Hz":(0.01,2e7)}
@@ -3659,9 +3873,19 @@ class TG10Window(QMainWindow):
         grid.setVerticalSpacing(5)
         grid.setColumnStretch(0, 1)
         grid.setColumnStretch(1, 1)
-        grid.setRowStretch(0, 1)
-        grid.setRowStretch(1, 1)
-        grid.setRowStretch(2, 1)
+        
+        # Normal: compact
+        grid.setRowStretch(0, 0)
+
+        # Gate: compact
+        grid.setRowStretch(1, 0)
+
+        # Burst: give more space
+        grid.setRowStretch(2, 3)
+
+        # Frequency divider: give more space
+        grid.setRowStretch(3, 2)
+
 
         self.config_mode_group = QButtonGroup(self)
         self.config_mode_group.setExclusive(True)
@@ -3698,6 +3922,7 @@ class TG10Window(QMainWindow):
         # Normal
         # --------------------------------------------------------
         normal_box, normal_lay = mode_box()
+        normal_box.setMinimumHeight(65)
         mode_radio(normal_lay, "Normal")
         grid.addWidget(normal_box, 0, 0, 1, 2)
 
@@ -3707,7 +3932,7 @@ class TG10Window(QMainWindow):
         # --------------------------------------------------------
 
         gate_box, gate_lay = mode_box()
-
+        gate_box.setMinimumHeight(65)
         # --------------------------------------------------------
         # Main Gate mode radio
         # IMPORTANT:
@@ -3777,6 +4002,7 @@ class TG10Window(QMainWindow):
         # Burst
         # --------------------------------------------------------
         burst_box, burst_lay = mode_box()
+        burst_box.setMinimumHeight(120)
 
         mode_radio(burst_lay, "Burst")
 
@@ -3866,6 +4092,7 @@ class TG10Window(QMainWindow):
         # Frequency divider
         # --------------------------------------------------------
         divider_box, divider_lay = mode_box()
+        divider_box.setMinimumHeight(110)
 
         mode_radio(divider_lay, "Frequency divider")
 
