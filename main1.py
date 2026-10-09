@@ -1071,6 +1071,23 @@ class DelayDialog(QDialog):
             return 15
 
         return 3
+    
+    def _make_value_unit_widget(self, field, unit):
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+
+        field.setSizePolicy(
+            QSizePolicy.Expanding,
+            QSizePolicy.Fixed
+        )
+        unit.setFixedWidth(65)
+
+        layout.addWidget(field, 1)
+        layout.addWidget(unit)
+
+        return container
 
     def __init__(self, parent=None):
 
@@ -4109,32 +4126,48 @@ class TG10Window(QMainWindow):
         c1_grid.setVerticalSpacing(3)
 
         c1_grid.addWidget(label("Rise condition", "FieldLabel"), 0, 0)
+
         self.output_c1_rise = combo(self._output_condition_options("OUT0"), 108)
         self.output_c1_rise.setCurrentText("DEL0")
         self.output_c1_rise.currentTextChanged.connect(self._output_condition_changed)
         c1_grid.addWidget(self.output_c1_rise, 0, 1)
 
+        self.output_c1_rise_delay = QLineEdit()
+        self.output_c1_rise_delay.setReadOnly(True)
+        self.output_c1_rise_delay.setFixedWidth(105)
+        self.output_c1_rise_delay.setFixedHeight(28)
+        self.output_c1_rise_delay.setPlaceholderText("Delay")
+        c1_grid.addWidget(self.output_c1_rise_delay, 0, 2)
+
         c1_grid.addWidget(label("Fall condition", "FieldLabel"), 1, 0)
-        self.output_c1_fall = combo(self._output_condition_options("OUT0"), 108)
+
+        self.output_c1_fall = combo(
+            self._output_condition_options("OUT0"), 108
+        )
         self.output_c1_fall.setCurrentText("DEL1")
-        self.output_c1_fall.currentTextChanged.connect(self._output_condition_changed)
+        self.output_c1_fall.currentTextChanged.connect(
+            self._output_condition_changed
+        )
         c1_grid.addWidget(self.output_c1_fall, 1, 1)
 
+        self.output_c1_fall_delay = QLineEdit()
+        self.output_c1_fall_delay.setReadOnly(True)
+        self.output_c1_fall_delay.setFixedWidth(105)
+        self.output_c1_fall_delay.setFixedHeight(28)
+        self.output_c1_fall_delay.setPlaceholderText("Delay")
+        c1_grid.addWidget(self.output_c1_fall_delay, 1, 2)
+
+        
         c1_grid.addWidget(label("Pulse width", "FieldLabel"), 2, 0)
-        self.output_c1_pulse = QDoubleSpinBox()
-        self.output_c1_pulse.setRange(0.001, 150000000.0)
-        self.output_c1_pulse.setDecimals(2)
-        self.output_c1_pulse.setValue(25.64)
+
+        self.output_c1_pulse = QLineEdit()
+        self.output_c1_pulse.setReadOnly(True)
         self.output_c1_pulse.setFixedHeight(28)
-        self.output_c1_pulse_unit = combo(["ps", "ns", "us"], 58)
-        pulse1_row = QHBoxLayout()
-        pulse1_row.setContentsMargins(0, 0, 0, 0)
-        pulse1_row.setSpacing(4)
-        pulse1_row.addWidget(self.output_c1_pulse)
-        pulse1_row.addWidget(self.output_c1_pulse_unit)
-        pulse1_container = QWidget()
-        pulse1_container.setLayout(pulse1_row)
-        c1_grid.addWidget(pulse1_container, 2, 1)
+        self.output_c1_pulse.setPlaceholderText("---")
+        self.output_c1_pulse.setText("---")
+
+        c1_grid.addWidget(self.output_c1_pulse, 2, 1)
+
         condition_row.addWidget(config1, 1)
 
         config2 = QGroupBox("Config 2")
@@ -4148,28 +4181,38 @@ class TG10Window(QMainWindow):
         self.output_c2_rise.setCurrentText("DEL2")
         self.output_c2_rise.currentTextChanged.connect(self._output_condition_changed)
         c2_grid.addWidget(self.output_c2_rise, 0, 1)
+        
+        self.output_c2_rise_delay = QLineEdit()
+        self.output_c2_rise_delay.setReadOnly(True)
+        self.output_c2_rise_delay.setFixedWidth(105)
+        self.output_c2_rise_delay.setFixedHeight(28)
+        self.output_c2_rise_delay.setPlaceholderText("Delay")
+        c2_grid.addWidget(self.output_c2_rise_delay, 0, 2)
 
         c2_grid.addWidget(label("Fall condition", "FieldLabel"), 1, 0)
         self.output_c2_fall = combo(self._output_condition_options("OUT0"), 108)
         self.output_c2_fall.setCurrentText("DEL3")
         self.output_c2_fall.currentTextChanged.connect(self._output_condition_changed)
         c2_grid.addWidget(self.output_c2_fall, 1, 1)
+        
+        self.output_c2_fall_delay = QLineEdit()
+        self.output_c2_fall_delay.setReadOnly(True)
+        self.output_c2_fall_delay.setFixedWidth(105)
+        self.output_c2_fall_delay.setFixedHeight(28)
+        self.output_c2_fall_delay.setPlaceholderText("Delay")
+        c2_grid.addWidget(self.output_c2_fall_delay, 1, 2)
 
+        
         c2_grid.addWidget(label("Pulse width", "FieldLabel"), 2, 0)
-        self.output_c2_pulse = QDoubleSpinBox()
-        self.output_c2_pulse.setRange(0.001, 150000000.0)
-        self.output_c2_pulse.setDecimals(2)
-        self.output_c2_pulse.setValue(25.64)
+
+        self.output_c2_pulse = QLineEdit()
+        self.output_c2_pulse.setReadOnly(True)
         self.output_c2_pulse.setFixedHeight(28)
-        self.output_c2_pulse_unit = combo(["ps", "ns", "us"], 58)
-        pulse2_row = QHBoxLayout()
-        pulse2_row.setContentsMargins(0, 0, 0, 0)
-        pulse2_row.setSpacing(4)
-        pulse2_row.addWidget(self.output_c2_pulse)
-        pulse2_row.addWidget(self.output_c2_pulse_unit)
-        pulse2_container = QWidget()
-        pulse2_container.setLayout(pulse2_row)
-        c2_grid.addWidget(pulse2_container, 2, 1)
+        self.output_c2_pulse.setPlaceholderText("---")
+        self.output_c2_pulse.setText("---")
+
+        c2_grid.addWidget(self.output_c2_pulse, 2, 1)
+
         condition_row.addWidget(config2, 1)
 
         body.addLayout(condition_row)
@@ -4178,6 +4221,7 @@ class TG10Window(QMainWindow):
         
         self._update_output_logic_options()
         self._update_output_condition_controls()
+        self._output_condition_changed()
 
         add_card_action(
             frame,
@@ -4296,13 +4340,119 @@ class TG10Window(QMainWindow):
         self.output_logic.blockSignals(False)
 
     def _output_condition_changed(self, *_):
-        pass
+        """Refresh delay readbacks and calculate both pulse widths."""
 
+        pairs = (
+            (self.output_c1_rise, self.output_c1_rise_delay),
+            (self.output_c1_fall, self.output_c1_fall_delay),
+            (self.output_c2_rise, self.output_c2_rise_delay),
+            (self.output_c2_fall, self.output_c2_fall_delay),
+        )
+
+        values = {}
+
+        for selector, display in pairs:
+            condition = selector.currentText().strip()
+
+            try:
+                seconds = self._get_output_condition_seconds(condition)
+            except (RuntimeError, ValueError, AttributeError):
+                seconds = None
+
+            if seconds is None:
+                display.setText("---")
+            else:
+                display.setText(self._format_output_delay(seconds))
+                values[id(selector)] = seconds
+
+        self._update_output_pulse_width(
+            self.output_c1_pulse,
+            values.get(id(self.output_c1_rise)),
+            values.get(id(self.output_c1_fall)),
+        )
+
+        self._update_output_pulse_width(
+            self.output_c2_pulse,
+            values.get(id(self.output_c2_rise)),
+            values.get(id(self.output_c2_fall)),
+        )
+        
+    def _get_output_condition_seconds(self, condition):
+        """Read an ordinary or post-delay value from TG10."""
+
+        ser = getattr(self, "serial_connection", None)
+        monitor = getattr(self, "monitor_backend", None)
+
+        if ser is None or monitor is None:
+            return None
+
+        frequency = self.get_system_clock_hz()
+
+        if condition.startswith("post DEL"):
+            channel = int(condition[len("post DEL"):])
+            if not 0 <= channel <= 7:
+                return None
+
+            # Read the actual matching post-delay counter.
+            from testtg10.test01.monitor02 import _rd
+
+            count = _rd(ser, 0x26 + channel)
+
+            if channel == 4:
+                return count * 10e-9
+
+            return count * 28.0 / frequency
+
+        if condition.startswith("DEL"):
+            channel = int(condition[3:])
+            if not 0 <= channel <= 7:
+                return None
+
+            return monitor._delay_seconds(ser, channel, frequency)
+
+        return None
+
+
+    @staticmethod
+    def _format_output_delay(seconds):
+        """Format a delay with its time unit."""
+
+        seconds = max(float(seconds), 0.0)
+
+        if seconds < 1e-9:
+            return f"{seconds / 1e-12:.3f} ps"
+        if seconds < 1e-6:
+            return f"{seconds / 1e-9:.3f} ns"
+        if seconds < 1e-3:
+            return f"{seconds / 1e-6:.3f} µs"
+        if seconds < 1:
+            return f"{seconds / 1e-3:.3f} ms"
+
+        return f"{seconds:.9f} s"
+
+
+    
+    def _update_output_pulse_width(self, field, rise_seconds, fall_seconds):
+        """Display pulse width as Fall delay minus Rise delay."""
+        if rise_seconds is None or fall_seconds is None:
+            field.setText("---")
+            return
+
+        pulse_seconds = fall_seconds - rise_seconds
+
+        if pulse_seconds < 0:
+            field.setText("---")
+            return
+
+        field.setText(self._format_output_delay(pulse_seconds))
+
+    
     def _update_output_monitor(self, *_):
         self._update_output_logic_options()
         self._update_output_condition_controls()
         if hasattr(self, "monitor_table_widget"):
             self._update_monitor_values()
+        self._output_condition_changed()
 
     def _commit_output_to_monitor(self):
         if not hasattr(self, "monitor_table_widget"):
