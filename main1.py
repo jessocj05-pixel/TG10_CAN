@@ -3558,26 +3558,53 @@ class TG10Window(QMainWindow):
                 return
 
 
-            # 3. Normal clock-based modes
-            system_clock_hz = self.get_system_clock_hz()
+            # # 3. Normal clock-based modes
+            # system_clock_hz = self.get_system_clock_hz()
 
-            # 4. Calculate RateDiv
+            # # 4. Calculate RateDiv
+            # ratediv = max(
+            #     1,
+            #     int(round(system_clock_hz * period_s))
+            # )
+            
+            # 3. Read the clock actually selected by the TG10 rate-clock
+            # register. Do not use get_system_clock_hz() here: that helper
+            # returns the 2.5/3 GHz oscillator clock used by delay timing,
+            # while RateDiv is driven by the selected rate clock (which can
+            # be 100 MHz, CLK IN, CLK IN / 2, or SYNC IN).
+            if self.monitor_backend is None:
+                raise RuntimeError(
+                    "Monitor backend not loaded; cannot verify TG10 rate clock."
+                )
+
+            hardware_status = self.monitor_backend.read_status(
+                self.serial_connection,
+                show=False
+            )
+            rate_clock_hz = hardware_status.get("rate_clock_hz")
+
+            if rate_clock_hz is None or float(rate_clock_hz) <= 0:
+                raise ValueError(
+                    "TG10 rate clock is unavailable. Check the selected clock source and input signal."
+                )
+
+            # 4. Calculate RateDiv from the actual selected rate clock.
             ratediv = max(
                 1,
-                int(round(system_clock_hz * period_s))
+                int(round(float(rate_clock_hz) * period_s))
             )
 
-            # 4. Create sequence for TG10 register 0x20
+            # 5. Create sequence for TG10 register 0x20
             sequence = self.operations.seq_set_ratediv(ratediv)
 
-            # 5. Send RateDiv to TG10
+            # 6. Send RateDiv to TG10
             self.can_backend.send_sequence(
                 self.serial_connection,
                 sequence,
                 label="TG10 Frequency / Period"
             )
 
-            # 6. Update GUI monitor values
+            # 7. Update GUI monitor values
             self._commit_frequency_to_monitor()
 
             self.set_status(
@@ -4976,6 +5003,31 @@ class TG10Window(QMainWindow):
                     out_period_s
                 )
             )
+            
+            # The Monitor readback is the source of truth. Mirror valid hardware
+            # output values into the existing editable Frequency / Period fields.
+            # _set_frequency_hz() updates both controls under the existing signal
+            # guards, so this does not trigger a hardware write or a signal loop.
+            if out_hz is not None and out_period_s is not None:
+                try:
+                    actual_hz = float(out_hz)
+                    actual_period_s = float(out_period_s)
+
+                    if (
+                        0.01 <= actual_hz <= 20_000_000.0
+                        and 50e-9 <= actual_period_s <= 100.0
+                    ):
+                        self._set_frequency_hz(actual_hz)
+                        self.committed_frequency_hz = actual_hz
+                        self.committed_period_s = actual_period_s
+                        self.committed_freq_unit = self.freq_unit.currentText()
+                        self.committed_period_unit = self.period_unit.currentText()
+
+                except (TypeError, ValueError, OverflowError) as exc:
+                    print(
+                        f"[MONITOR] Could not sync Frequency / Period controls: {exc}"
+                    )
+        
         else:
             self.monitor_freq_value.setText("--")
             self.monitor_period_value.setText("--")
