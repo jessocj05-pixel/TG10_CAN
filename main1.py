@@ -46,14 +46,25 @@ RADIO_CHECKED = os.path.join(
 # ============================================================
 # monitor02.py uses the register transport from test01/main.py.
 # Keep this path separate from the main GUI file (main1.py).
+
+# ============================================================
+# TG10 TEST01 MONITOR BACKEND PATH
+# ============================================================
+# Existing monitor and supporting modules are in testtg10/test01.
 TEST01_DIR = os.path.join(
     TG10_CAN_DIR,
     "testtg10",
     "test01"
 )
 
+if not os.path.isdir(TEST01_DIR):
+    raise FileNotFoundError(
+        f"TG10 backend folder not found: {TEST01_DIR}"
+    )
+
 if TEST01_DIR not in sys.path:
     sys.path.insert(0, TEST01_DIR)
+
 
 from PySide6.QtCore import Qt, QPointF, QRectF, QTimer, QObject, Signal, QThread, QEvent
 from PySide6.QtGui import (
@@ -66,7 +77,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QGridLayout, QTableWidget, QTableWidgetItem,
     QHeaderView, QAbstractItemView, QButtonGroup, QSizePolicy,
     QToolButton, QDialog, QDialogButtonBox, QFormLayout,
-    QGroupBox, QStackedWidget, QMessageBox
+    QGroupBox, QStackedWidget, QMessageBox, QProgressBar
 )
 
 class TG10RadioButton(QRadioButton):
@@ -270,7 +281,8 @@ QPushButton#Tab {{
     border-radius: 3px;
     color: #314b62;
     min-height: 32px;
-    padding: 3px 11px;
+    min-width: 76px;
+    padding: 3px 14px;
 }}
 
 QPushButton#Tab:hover {{
@@ -587,6 +599,19 @@ QPushButton#TriggerBtn:pressed {{
     border-color: {BLUE};
     color: white;
 }}
+
+
+QProgressBar#StatusProgress {{
+    background-color: #DCE8DF;
+    border: none;
+    border-radius: 2px;
+}}
+
+QProgressBar#StatusProgress::chunk {{
+    background-color: #22C55E;
+    border-radius: 2px;
+}}
+
 """
 
 
@@ -2437,6 +2462,9 @@ class TG10Window(QMainWindow):
             if i == 0:
                 b.setChecked(True)
             group.addButton(b, i)
+            b.setMinimumWidth(
+                b.fontMetrics().horizontalAdvance(name) + 30
+            )
             h.addWidget(b)
 
         h.addStretch()
@@ -5047,9 +5075,10 @@ class TG10Window(QMainWindow):
                 return None
 
             # Read the actual matching post-delay counter.
-            from testtg10.test01.monitor02 import _rd
+            # from testtg10.test01.monitor02 import _rd
 
-            count = _rd(ser, 0x26 + channel)
+            # count = _rd(ser, 0x26 + channel)
+            count = monitor._rd(ser, 0x26 + channel)
 
             if channel == 4:
                 return count * 10e-9
@@ -5085,19 +5114,46 @@ class TG10Window(QMainWindow):
 
 
     
+    
     def _update_output_pulse_width(self, field, rise_seconds, fall_seconds):
-        """Display pulse width as Fall delay minus Rise delay."""
+        """Display PW according to the selected Rise and Fall sources."""
+
+        if field is self.output_c1_pulse:
+            rise = self.output_c1_rise.currentText().strip()
+            fall = self.output_c1_fall.currentText().strip()
+        elif field is self.output_c2_pulse:
+            rise = self.output_c2_rise.currentText().strip()
+            fall = self.output_c2_fall.currentText().strip()
+        else:
+            field.setText("--")
+            return
+
+        # R = post DEL: PW is undefined for either Fall selection.
+        if rise.startswith("post DEL"):
+            field.setText("--")
+            return
+
+        # R = any DEL, F = post DEL: PW equals the post-delay value.
+        if fall.startswith("post DEL"):
+            if fall_seconds is None:
+                field.setText("--")
+            else:
+                field.setText(self._format_output_delay(fall_seconds))
+            return
+
+        # Both sources are ordinary DEL delays: PW = F - R.
         if rise_seconds is None or fall_seconds is None:
-            field.setText("---")
+            field.setText("--")
             return
 
         pulse_seconds = fall_seconds - rise_seconds
 
         if pulse_seconds < 0:
-            field.setText("---")
+            field.setText("--")
             return
 
         field.setText(self._format_output_delay(pulse_seconds))
+
 
     
     def _update_output_monitor(self, *_):
@@ -5610,6 +5666,7 @@ class TG10Window(QMainWindow):
         
         monitor = self.monitor_backend
 
+        
         status = data.get("status")
 
         if status is None:
@@ -5620,62 +5677,134 @@ class TG10Window(QMainWindow):
             self.monitor_sync_value.setText("--")
             self.monitor_freq_value.setText("--")
             self.monitor_period_value.setText("--")
+
         else:
             mode = status.get("mode")
 
-
-        self.monitor_sync_value.setText(
-            self._monitor_mode_text(mode)
-        )
-
-        out_hz = status.get("out_hz")
-        out_period_s = status.get("out_period_s")
-
-        if out_hz is not None and out_hz > 0:
-            self.monitor_freq_value.setText(
-                self._monitor_frequency_text(
-                    monitor,
-                    out_hz
-                )
+            self.monitor_sync_value.setText(
+                self._monitor_mode_text(mode)
             )
 
-            if out_period_s is None:
-                out_period_s = 1.0 / out_hz
+            out_hz = status.get("out_hz")
+            out_period_s = status.get("out_period_s")
 
-            self.monitor_period_value.setText(
-                self._monitor_period_text(
-                    monitor,
-                    out_period_s
-                )
-            )
-            
-            # The Monitor readback is the source of truth. Mirror valid hardware
-            # output values into the existing editable Frequency / Period fields.
-            # _set_frequency_hz() updates both controls under the existing signal
-            # guards, so this does not trigger a hardware write or a signal loop.
-            if out_hz is not None and out_period_s is not None:
-                try:
-                    actual_hz = float(out_hz)
-                    actual_period_s = float(out_period_s)
-
-                    if (
-                        0.01 <= actual_hz <= 20_000_000.0
-                        and 50e-9 <= actual_period_s <= 100.0
-                    ):
-                        self._set_frequency_hz(actual_hz)
-                        self.committed_frequency_hz = actual_hz
-                        self.committed_period_s = actual_period_s
-                        self.committed_freq_unit = self.freq_unit.currentText()
-                        self.committed_period_unit = self.period_unit.currentText()
-
-                except (TypeError, ValueError, OverflowError) as exc:
-                    print(
-                        f"[MONITOR] Could not sync Frequency / Period controls: {exc}"
+            if out_hz is not None and out_hz > 0:
+                self.monitor_freq_value.setText(
+                    self._monitor_frequency_text(
+                        monitor,
+                        out_hz
                     )
-        
-        else:
+                )
+
+                if out_period_s is None:
+                    out_period_s = 1.0 / out_hz
+
+                self.monitor_period_value.setText(
+                    self._monitor_period_text(
+                        monitor,
+                        out_period_s
+                    )
+                )
+
+                # Mirror valid hardware values into the existing
+                # Frequency / Period controls.
+                if out_period_s is not None:
+                    try:
+                        actual_hz = float(out_hz)
+                        actual_period_s = float(out_period_s)
+
+                        if (
+                            0.01 <= actual_hz <= 20_000_000.0
+                            and 50e-9 <= actual_period_s <= 100.0
+                        ):
+                            self._set_frequency_hz(actual_hz)
+                            self.committed_frequency_hz = actual_hz
+                            self.committed_period_s = actual_period_s
+                            self.committed_freq_unit = (
+                                self.freq_unit.currentText()
+                            )
+                            self.committed_period_unit = (
+                                self.period_unit.currentText()
+                            )
+
+                    except (TypeError, ValueError, OverflowError) as exc:
+                        print(
+                            "[MONITOR] Could not sync Frequency / "
+                            f"Period controls: {exc}"
+                        )
+
+            else:
+                self.monitor_freq_value.setText("--")
+                self.monitor_period_value.setText("--")
+
+        if status is None:
+            print(
+                f"[MONITOR] Status read failed: "
+                f"{data.get('status_error', 'Unknown error')}"
+            )
+            self.monitor_sync_value.setText("--")
             self.monitor_freq_value.setText("--")
             self.monitor_period_value.setText("--")
+
+        else:
+            mode = status.get("mode")
+
+            self.monitor_sync_value.setText(
+                self._monitor_mode_text(mode)
+            )
+
+            out_hz = status.get("out_hz")
+            out_period_s = status.get("out_period_s")
+
+            if out_hz is not None and out_hz > 0:
+                self.monitor_freq_value.setText(
+                    self._monitor_frequency_text(
+                        monitor,
+                        out_hz
+                    )
+                )
+
+                if out_period_s is None:
+                    out_period_s = 1.0 / out_hz
+
+                self.monitor_period_value.setText(
+                    self._monitor_period_text(
+                        monitor,
+                        out_period_s
+                    )
+                )
+
+                # Mirror valid hardware readback into the existing
+                # Frequency / Period controls without writing to hardware.
+                if out_period_s is not None:
+                    try:
+                        actual_hz = float(out_hz)
+                        actual_period_s = float(out_period_s)
+
+                        if (
+                            0.01 <= actual_hz <= 20_000_000.0
+                            and 50e-9 <= actual_period_s <= 100.0
+                        ):
+                            self._set_frequency_hz(actual_hz)
+                            self.committed_frequency_hz = actual_hz
+                            self.committed_period_s = actual_period_s
+                            self.committed_freq_unit = (
+                                self.freq_unit.currentText()
+                            )
+                            self.committed_period_unit = (
+                                self.period_unit.currentText()
+                            )
+
+                    except (TypeError, ValueError, OverflowError) as exc:
+                        print(
+                            "[MONITOR] Could not sync Frequency / "
+                            f"Period controls: {exc}"
+                        )
+
+            else:
+                self.monitor_freq_value.setText("--")
+                self.monitor_period_value.setText("--")
+
 
         # Device status.
         if data["run_status_error"] is None:
@@ -5753,8 +5882,14 @@ class TG10Window(QMainWindow):
                 f"{data['output_error']}"
             )
 
+        # Mirror successful configuration readback into the Configuration card.
+        config_data = data.get("config")
+        if data["config_error"] is None and config_data is not None:
+            self._apply_config_readback_to_card(config_data)
+
         errors = []
         for key, title in (
+            ("status_error", "status"),
             ("run_status_error", "run status"),
             ("live_error", "live parameters"),
             ("config_error", "config"),
@@ -5762,17 +5897,11 @@ class TG10Window(QMainWindow):
         ):
             if data[key]:
                 errors.append(title)
-
+        
         if errors:
             return "Monitor refreshed; partial read: " + ", ".join(errors)
 
-        return "Monitor refreshed from TG10 hardware"
-    
-    
-        # Mirror the configuration read from the TG10 into the Configuration card.
-        config_data = data.get("config")
-        if config_data is not None:
-            self._apply_config_readback_to_card(config_data)
+        return "Monitor refreshed from TG10 hardware"        
 
 
     # ========================================================
@@ -5861,10 +5990,12 @@ class TG10Window(QMainWindow):
         The loading indicator remains visible until the actual backend
         hardware reads return. There is no fixed artificial delay.
         """
+        
         if (
             not self.connection_state
             or self.serial_connection is None
         ):
+            self.status_progress.hide()
             self._set_refresh_button_active(True)
             QTimer.singleShot(180, lambda: self._set_refresh_button_active(False))
             self.set_status(
@@ -5873,6 +6004,7 @@ class TG10Window(QMainWindow):
             return
 
         if self.monitor_backend is None:
+            self.status_progress.hide()
             self._set_refresh_button_active(True)
             QTimer.singleShot(180, lambda: self._set_refresh_button_active(False))
             self.set_status(
@@ -5889,6 +6021,7 @@ class TG10Window(QMainWindow):
         self.set_status(
             "Refreshing TG10 Monitor..."
         )
+        self.status_progress.show()
         self._toggle_refresh_visual(True)
 
         self.monitor_refresh_thread = QThread(self)
@@ -5952,6 +6085,7 @@ class TG10Window(QMainWindow):
         )
 
     def _monitor_refresh_thread_finished(self):
+        self.status_progress.hide()
         self._toggle_refresh_visual(False)
 
         thread = self.monitor_refresh_thread
@@ -6075,13 +6209,20 @@ class TG10Window(QMainWindow):
 
         # Stretch all columns so the table uses the complete
         # width of the third dashboard column.
-        for column in range(
-            len(headers)
-        ):
-            table.horizontalHeader().setSectionResizeMode(
-                column,
-                QHeaderView.Stretch
-            )
+        # for column in range(
+        #     len(headers)
+        # ):
+        #     table.horizontalHeader().setSectionResizeMode(
+        #         column,
+        #         QHeaderView.Stretch
+        #     )
+        
+        for column in range(len(headers)):
+            if column == 1 or column == 2 or column == 3 or column == 4: # Change this to the index of the column you want to stretch
+                table.horizontalHeader().setSectionResizeMode(column, QHeaderView.Stretch)
+            else:
+                table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeToContents)
+
 
         # Eight rows must always remain visible.
         table.verticalHeader().setSectionResizeMode(
@@ -6276,58 +6417,54 @@ class TG10Window(QMainWindow):
     # STATUS BAR
     # ========================================================
 
+        
     def status_bar(self):
-
         w = QWidget()
-
-        w.setObjectName(
-            "StatusBar"
-        )
-
-        w.setMinimumHeight(
-            26
-        )
-
-        w.setMaximumHeight(
-            26
-        )
+        w.setObjectName("StatusBar")
+        w.setMinimumHeight(26)
+        w.setMaximumHeight(26)
 
         h = QHBoxLayout(w)
+        h.setContentsMargins(12, 0, 12, 0)
+        h.setSpacing(8)
 
-        h.setContentsMargins(
-            12, 0, 12, 0
-        )
-
+        # Left: status text
+        h.addWidget(label("C-DAC", "StatusRight"))
         self.status = label(
             "Ready   |   Not connected",
             "StatusText"
         )
+        # h.addWidget(self.status)
+        h.addWidget(self.status, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
-        h.addWidget(
-            self.status
-        )
+        # Center: green loading bar
+        self.status_progress = QProgressBar()
+        self.status_progress.setObjectName("StatusProgress")
+        
+        self.status_progress.setFixedSize(290, 8)
+        self.status_progress.setTextVisible(False)
+        self.status_progress.setRange(0, 0)
+        self.status_progress.setStyleSheet("""
+            QProgressBar {
+                background-color: #DCE8DF;
+                border: 1px solid #B7DCC2;
+                border-radius: 4px;
+            }
+            QProgressBar::chunk {
+                background-color: #22C55E;
+                border-radius: 4px;
+            }
+        """)
+        self.status_progress.hide()
 
-        h.addStretch()
-
-        h.addWidget(
-            label(
-                "C-DAC",
-                "StatusRight"
-            )
-        )
-
-        h.addSpacing(
-            12
-        )
-
-        h.addWidget(
-            label(
-                "TG10 GUI v1.0",
-                "StatusRight"
-            )
-        )
+        # h.addWidget(self.status_progress)
+        h.addStretch(1)
+        h.addWidget(self.status_progress, 0, Qt.AlignmentFlag.AlignCenter)
+        h.addStretch(1)
+        h.addWidget(label("TG10 GUI v1.0", "StatusRight"))        
 
         return w
+
 
     # ========================================================
     # USB-CAN / BACKEND CONNECTION
