@@ -25,6 +25,17 @@ import os
 # TG10_CAN_DIR = os.path.abspath(
 #     os.path.join(os.path.dirname(__file__), "..", "TG10_CAN")
 # )
+def resource_path(filename):
+    if getattr(sys, 'frozen', False):
+        base = sys._MEIPASS
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base, filename)
+
+RADIO_UNCHECKED = resource_path("radio_unchecked.svg").replace("\\", "/")
+RADIO_CHECKED = resource_path("radio_checked.svg").replace("\\", "/")
+LOGO_PATH = resource_path("cdac_logo.png").replace("\\", "/")
+
 TG10_CAN_DIR = os.path.dirname(os.path.abspath(__file__))
 
 if TG10_CAN_DIR not in sys.path:
