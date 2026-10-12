@@ -10,6 +10,7 @@ Requirement:
 """
 import sys
 import os
+import json
 
 # ============================================================
 # TG10 BACKEND PATH
@@ -2122,94 +2123,315 @@ class DelayDialog(QDialog):
 # PRESET DIALOG
 # ============================================================
 
-class PresetDialog(QDialog):
+# class PresetDialog(QDialog):
 
+#     def __init__(self, parent=None):
+
+#         super().__init__(parent)
+
+#         self.setWindowTitle("Load Presets")
+#         self.resize(650, 400)
+
+#         root = QVBoxLayout(self)
+#         root.setContentsMargins(14, 14, 14, 14)
+
+#         root.addWidget(
+#             label(
+#                 "Load Presets",
+#                 bold=True,
+#                 size=16,
+#                 color=DEEP
+#             )
+#         )
+
+#         table = QTableWidget(4, 5)
+
+#         table.setHorizontalHeaderLabels([
+#             "Preset",
+#             "Frequency",
+#             "Sync",
+#             "Config",
+#             "Status"
+#         ])
+
+#         table.verticalHeader().setVisible(False)
+
+#         table.horizontalHeader().setSectionResizeMode(
+#             QHeaderView.Stretch
+#         )
+
+#         data = [
+#             ["Default", "1.000000 MHz",
+#              "Internal", "Config 1", "Ready"],
+
+#             ["Pockels_100ns", "1.000000 MHz",
+#              "Internal", "Config 1", "Ready"],
+
+#             ["External_Sync", "10.000000 MHz",
+#              "External", "Config 2", "Ready"],
+
+#             ["Experiment_01", "5.000000 MHz",
+#              "Internal", "Config 2", "Ready"]
+#         ]
+
+#         for r, row in enumerate(data):
+
+#             for c, value in enumerate(row):
+
+#                 item = QTableWidgetItem(value)
+#                 item.setTextAlignment(Qt.AlignCenter)
+
+#                 table.setItem(r, c, item)
+
+#         root.addWidget(table, 1)
+
+#         buttons = QHBoxLayout()
+
+#         for text in [
+#             "LOAD",
+#             "SAVE",
+#             "ADD",
+#             "EDIT",
+#             "DELETE"
+#         ]:
+
+#             b = QPushButton(text)
+#             b.setObjectName("SmallBtn")
+
+#             buttons.addWidget(b)
+
+#         buttons.addStretch()
+
+#         close = QPushButton("Close")
+#         close.setObjectName("SmallBtn")
+#         close.clicked.connect(self.accept)
+
+#         buttons.addWidget(close)
+
+#         root.addLayout(buttons)
+
+
+class SavePresetsDialog(QDialog):
     def __init__(self, parent=None):
-
         super().__init__(parent)
+        self.parent_window = parent
 
-        self.setWindowTitle("TG10 Preset Manager")
-        self.resize(650, 400)
+        self.setWindowTitle("Save Presets")
+        self.setFixedSize(520, 250)
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(14, 14, 14, 14)
+        root.setContentsMargins(18, 16, 18, 16)
+        root.setSpacing(14)
 
-        root.addWidget(
-            label(
-                "Preset Manager",
-                bold=True,
-                size=16,
-                color=DEEP
-            )
+        title = QLabel("Save Presets")
+        title.setStyleSheet(
+            "font-size: 18px; font-weight: 700; color: #0b4778;"
         )
+        root.addWidget(title)
 
-        table = QTableWidget(4, 5)
+        root.addWidget(QLabel("Preset Name:"))
 
-        table.setHorizontalHeaderLabels([
-            "Preset",
-            "Frequency",
-            "Sync",
-            "Config",
-            "Status"
-        ])
-
-        table.verticalHeader().setVisible(False)
-
-        table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.Stretch
-        )
-
-        data = [
-            ["Default", "1.000000 MHz",
-             "Internal", "Config 1", "Ready"],
-
-            ["Pockels_100ns", "1.000000 MHz",
-             "Internal", "Config 1", "Ready"],
-
-            ["External_Sync", "10.000000 MHz",
-             "External", "Config 2", "Ready"],
-
-            ["Experiment_01", "5.000000 MHz",
-             "Internal", "Config 2", "Ready"]
-        ]
-
-        for r, row in enumerate(data):
-
-            for c, value in enumerate(row):
-
-                item = QTableWidgetItem(value)
-                item.setTextAlignment(Qt.AlignCenter)
-
-                table.setItem(r, c, item)
-
-        root.addWidget(table, 1)
+        self.name_edit = QLineEdit()
+        self.name_edit.setPlaceholderText("Enter preset name")
+        root.addWidget(self.name_edit)
 
         buttons = QHBoxLayout()
-
-        for text in [
-            "LOAD",
-            "SAVE",
-            "ADD",
-            "EDIT",
-            "DELETE"
-        ]:
-
-            b = QPushButton(text)
-            b.setObjectName("SmallBtn")
-
-            buttons.addWidget(b)
-
         buttons.addStretch()
 
-        close = QPushButton("Close")
-        close.setObjectName("SmallBtn")
-        close.clicked.connect(self.accept)
-
-        buttons.addWidget(close)
+        save_button = QPushButton("Save")
+        save_button.setMinimumSize(110, 42)
+        save_button.clicked.connect(self.save_preset)
+        buttons.addWidget(save_button)
 
         root.addLayout(buttons)
 
+    def save_preset(self):
+        name = self.name_edit.text().strip()
 
+        if not name:
+            QMessageBox.warning(
+                self, "Save Presets", "Please enter a preset name."
+            )
+            return
+
+        try:
+            presets = self.parent_window.read_saved_presets()
+
+            if any(
+                item["name"].casefold() == name.casefold()
+                for item in presets
+            ):
+                QMessageBox.warning(
+                    self, "Save Presets",
+                    "A preset with this name already exists."
+                )
+                return
+
+            presets.append({"name": name})
+            self.parent_window.write_saved_presets(presets)
+
+            QMessageBox.information(
+                self, "Save Presets",
+                f'Preset "{name}" saved successfully.'
+            )
+            self.accept()
+
+        except Exception as exc:
+            QMessageBox.critical(
+                self, "Save Presets",
+                f"Could not save preset:\n{exc}"
+            )
+
+class LoadPresetsDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self.setWindowTitle("Load Presets")
+        self.setFixedSize(650, 400)
+        self.parent_window = parent
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(18, 16, 18, 16)
+        root.setSpacing(12)
+
+        title = QLabel("Load Presets")
+        title.setStyleSheet(
+            "font-size: 18px; font-weight: 700; color: #0b4778;"
+        )
+        root.addWidget(title)
+
+        # Exactly two columns
+        self.table = QTableWidget(0, 2)
+        self.table.setHorizontalHeaderLabels(
+            ["S.No.", "Preset Name"]
+        )
+        self.table.verticalHeader().setVisible(False)
+        self.table.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows
+        )
+        self.table.setSelectionMode(
+            QAbstractItemView.SelectionMode.SingleSelection
+        )
+        self.table.setEditTriggers(
+            QAbstractItemView.EditTrigger.NoEditTriggers
+        )
+
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(
+            0, QHeaderView.ResizeMode.ResizeToContents
+        )
+        header.setSectionResizeMode(
+            1, QHeaderView.ResizeMode.Stretch
+        )
+
+        root.addWidget(self.table, 1)
+
+        # Bottom buttons, as in your sketch
+        buttons = QHBoxLayout()
+
+        self.delete_button = QPushButton("Delete")
+        self.delete_button.setMinimumSize(115, 42)
+
+        buttons.addWidget(self.delete_button)
+        buttons.addStretch()
+
+        self.load_button = QPushButton("Load")
+        self.load_button.setMinimumSize(115, 42)
+        self.load_button.setDefault(True)
+
+        buttons.addWidget(self.load_button)
+        root.addLayout(buttons)
+
+        self.delete_button.clicked.connect(self.delete_selected)
+        self.load_button.clicked.connect(self.load_selected)
+
+        # Populate using the existing preset data, if available.
+        self.refresh_presets()
+
+    def refresh_presets(self):
+        """Populate rows from the existing preset manager when available."""
+        self.table.setRowCount(0)
+
+        # Do not invent preset names or pretend sample entries are saved.
+        # Connect the existing persistence source here.
+        try:
+            presets = self.parent_window.read_saved_presets()
+        except Exception as exc:
+            QMessageBox.warning(
+                self, "Load Presets",
+                f"Could not read saved presets:\n{exc}"
+            )
+            return
+
+        for index, preset in enumerate(presets, start=1):
+            if isinstance(preset, tuple) and len(preset) == 2:
+                name = str(preset[0])
+            elif isinstance(preset, dict):
+                name = str(preset.get("name", f"Preset {index}"))
+            else:
+                name = str(preset)
+
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+            self.table.setItem(row, 0, QTableWidgetItem(str(index)))
+            self.table.setItem(row, 1, QTableWidgetItem(name))
+
+    def delete_selected(self):
+        row = self.table.currentRow()
+        if row < 0:
+            QMessageBox.warning(
+                self, "Delete Preset", "Select a preset first."
+            )
+            return
+
+        name_item = self.table.item(row, 1)
+        if name_item is None:
+            return
+
+        name = name_item.text()
+
+        answer = QMessageBox.question(
+            self,
+            "Delete Preset",
+            f'Delete preset "{name}"?',
+            QMessageBox.StandardButton.Yes
+            | QMessageBox.StandardButton.No
+        )
+
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            presets = self.parent_window.read_saved_presets()
+            presets = [
+                item for item in presets
+                if item["name"] != name
+            ]
+            self.parent_window.write_saved_presets(presets)
+            self.refresh_presets()
+        except Exception as exc:
+            QMessageBox.critical(
+                self, "Delete Preset",
+                f"Could not delete preset:\n{exc}"
+            )
+
+
+    def load_selected(self):
+        row = self.table.currentRow()
+        if row < 0:
+            QMessageBox.warning(
+                self, "Load Preset", "Select a preset first."
+            )
+            return
+
+        QMessageBox.information(
+            self,
+            "Load Preset",
+            "Connect this action to the existing preset-restoration "
+            "function before applying settings."
+        )
+
+        
 # ============================================================
 # MAIN WINDOW
 # ============================================================
@@ -2463,14 +2685,14 @@ class TG10Window(QMainWindow):
         # self.delay_header_btn.clicked.connect(self.open_delay)
 
         # h.addWidget(self.delay_header_btn)
-
+        
         # Presets
-        self.presets_header_btn = QPushButton("PRESETS")
-        self.presets_header_btn.setObjectName("HdrBtn")
-        self.presets_header_btn.setFixedWidth(100)
-        self.presets_header_btn.clicked.connect(self.open_presets)
+        # self.presets_header_btn = QPushButton("PRESETS")
+        # self.presets_header_btn.setObjectName("HdrBtn")
+        # self.presets_header_btn.setFixedWidth(100)
+        # self.presets_header_btn.clicked.connect(self.open_load_presets)
 
-        h.addWidget(self.presets_header_btn)
+        # h.addWidget(self.presets_header_btn)
 
         # Run
         self.run_button = QPushButton("▶  RUN")
@@ -2511,7 +2733,6 @@ class TG10Window(QMainWindow):
             "Output",
             "Monitor",
             "Other",
-            "Preset manager",
         ]
 
         for i, name in enumerate(names):
@@ -2529,6 +2750,24 @@ class TG10Window(QMainWindow):
             h.addWidget(b)
 
         h.addStretch()
+        
+        # Load Presets button
+        self.load_presets_button = QPushButton("Load Presets")
+        self.load_presets_button.setObjectName("Tab")
+        self.load_presets_button.setCursor(Qt.PointingHandCursor)
+        self.load_presets_button.setMinimumWidth(130)
+        self.load_presets_button.clicked.connect(self.open_load_presets)
+
+        h.addWidget(self.load_presets_button)
+        
+        # Save Presets button at the far right of the navigation bar
+        self.save_presets_button = QPushButton("Save Presets")
+        self.save_presets_button.setObjectName("Tab")
+        self.save_presets_button.setCursor(Qt.PointingHandCursor)
+        self.save_presets_button.setMinimumWidth(130)
+        self.save_presets_button.clicked.connect(self.open_save_presets)
+
+        h.addWidget(self.save_presets_button)
         return w
 
     def _navigation_clicked(self, name):
@@ -2541,8 +2780,17 @@ class TG10Window(QMainWindow):
         if name == "Delay presets":
             self.open_delay()
             return
-
+        if name == "Load Presets":
+            self.open_load_presets()
+            return
+        if name == "Save Presets":
+            self.open_save_presets()
+            return
         self.highlight_section(name)
+        
+    def open_load_presets(self):
+        dialog = LoadPresetsDialog(self)
+        dialog.exec()
 
     def highlight_header_buttons(self, name):
         """Highlight DELAY/PRESETS buttons in the header near COM."""
@@ -2556,7 +2804,7 @@ class TG10Window(QMainWindow):
         #     delay.update()
 
         if presets is not None:
-            presets.setProperty("active", name == "Preset manager")
+            presets.setProperty("active", name == "Load Presets")
             presets.style().unpolish(presets)
             presets.style().polish(presets)
             presets.update()
@@ -6741,13 +6989,41 @@ class TG10Window(QMainWindow):
             )
 
         self.delay_dialog.exec()
-
-    def open_presets(self):
-
-        dialog = PresetDialog(
-            self
+        
+        
+    def preset_storage_path(self):
+        return os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "tg10_presets.json"
         )
 
+    def read_saved_presets(self):
+        path = self.preset_storage_path()
+
+        if not os.path.exists(path):
+            return []
+
+        with open(path, "r", encoding="utf-8") as file:
+            presets = json.load(file)
+
+        if not isinstance(presets, list):
+            raise ValueError("Preset storage must contain a JSON list.")
+
+        return presets
+
+    def write_saved_presets(self, presets):
+        path = self.preset_storage_path()
+
+        with open(path, "w", encoding="utf-8") as file:
+            json.dump(presets, file, indent=4, ensure_ascii=False)
+
+    def open_save_presets(self):
+        dialog = SavePresetsDialog(self)
+        dialog.exec()
+
+    
+    def open_save_presets(self):
+        dialog = SavePresetsDialog(self)
         dialog.exec()
 
     def toggle_run(self):
