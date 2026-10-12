@@ -2438,9 +2438,9 @@ class TG10Window(QMainWindow):
 
         self.connection.setCursor(Qt.PointingHandCursor)
         self.connection.setFixedWidth(190)
-        self.connection.setToolTip(
-            "Click here to disconnect when TG10 is connected"
-        )
+        # self.connection.setToolTip(
+        #     "Click here to disconnect when TG10 is connected"
+        # )
         self.connection.clicked.connect(
             self._request_disconnect
         )
@@ -2457,12 +2457,12 @@ class TG10Window(QMainWindow):
         h.addWidget(com)
 
         # Delay
-        self.delay_header_btn = QPushButton("DELAY")
-        self.delay_header_btn.setObjectName("HdrBtn")
-        self.delay_header_btn.setFixedWidth(95)
-        self.delay_header_btn.clicked.connect(self.open_delay)
+        # self.delay_header_btn = QPushButton("DELAY")
+        # self.delay_header_btn.setObjectName("HdrBtn")
+        # self.delay_header_btn.setFixedWidth(95)
+        # self.delay_header_btn.clicked.connect(self.open_delay)
 
-        h.addWidget(self.delay_header_btn)
+        # h.addWidget(self.delay_header_btn)
 
         # Presets
         self.presets_header_btn = QPushButton("PRESETS")
@@ -2538,19 +2538,22 @@ class TG10Window(QMainWindow):
         if name == "Other":
             self.open_other()
             return
+        if name == "Delay presets":
+            self.open_delay()
+            return
 
         self.highlight_section(name)
 
     def highlight_header_buttons(self, name):
         """Highlight DELAY/PRESETS buttons in the header near COM."""
-        delay = getattr(self, "delay_header_btn", None)
+        # delay = getattr(self, "delay_header_btn", None)
         presets = getattr(self, "presets_header_btn", None)
 
-        if delay is not None:
-            delay.setProperty("active", name == "Delay presets")
-            delay.style().unpolish(delay)
-            delay.style().polish(delay)
-            delay.update()
+        # if delay is not None:
+        #     delay.setProperty("active", name == "Delay presets")
+        #     delay.style().unpolish(delay)
+        #     delay.style().polish(delay)
+        #     delay.update()
 
         if presets is not None:
             presets.setProperty("active", name == "Preset manager")
@@ -5301,9 +5304,9 @@ class TG10Window(QMainWindow):
         self.monitor_refresh_spinner.setObjectName("RefreshArrow")
         self.monitor_refresh_spinner.setAlignment(Qt.AlignCenter)
         self.monitor_refresh_spinner.setFixedSize(30, 34)
-        self.monitor_refresh_spinner.setToolTip(
-            "↻ Idle • rotating while Monitor is being refreshed"
-        )
+        # self.monitor_refresh_spinner.setToolTip(
+        #     "↻ Idle • rotating while Monitor is being refreshed"
+        # )
         header.addWidget(self.monitor_refresh_spinner)
 
         # ----------------------------------------------------
@@ -6596,7 +6599,7 @@ class TG10Window(QMainWindow):
         self.connection_state = False
         self.monitor_backend = None
         self.connection.setText("●  DISCONNECTED")
-        self.connection.setToolTip("Connect or select a COM port using COM")
+        # self.connection.setToolTip("Connect or select a COM port using COM")
         if hasattr(self, "connection"):
             self.connection.setEnabled(False)
 
@@ -6660,9 +6663,9 @@ class TG10Window(QMainWindow):
             self.connection.setText(
                 f"●  CONNECTED — {port}"
             )
-            self.connection.setToolTip(
-                "Click here to disconnect from the TG10 USB-CAN device"
-            )
+            # self.connection.setToolTip(
+            #     "Click here to disconnect from the TG10 USB-CAN device"
+            # )
             if hasattr(self, "connection"):
                 self.connection.setEnabled(True)
             self.set_status(
