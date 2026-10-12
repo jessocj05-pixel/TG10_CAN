@@ -1690,7 +1690,40 @@ class DelayDialog(QDialog):
                 field.blockSignals(True)
                 field.setValue(actual_value)
                 field.blockSignals(False)
+            
+            # Read Post-delay presets from TG10
+            from testtg10.test01 import monitor02 as monitor
 
+            for ch in range(8):
+                field = self.post_delay_fields[ch]
+                unit = self.post_delay_units[ch]
+                selected_unit = unit.currentText()
+
+                # Get the existing post-delay register mapping
+                register = monitor.DEL_REGS[ch]["post"]
+
+                # Read the post-delay counter
+                count = monitor._rd(
+                    parent.serial_connection,
+                    register
+                )
+
+                # Convert the hardware counter to seconds
+                if ch == 4:
+                    actual_time_s = count * 10e-9
+                else:
+                    actual_time_s = count * 28.0 / f_hz
+
+                # Convert seconds to the selected GUI unit
+                actual_value = (
+                    actual_time_s /
+                    self.UNIT_TO_SECONDS[selected_unit]
+                )
+
+                field.blockSignals(True)
+                field.setValue(actual_value)
+                field.blockSignals(False)
+            
         except Exception as e:
             QMessageBox.warning(
                 self,
