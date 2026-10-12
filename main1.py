@@ -2257,6 +2257,14 @@ class TG10Window(QMainWindow):
             self._automatic_inactivity_refresh
         )
         self._monitor_inactivity_refresh_enabled = False
+        
+        # Detect when the USB-CAN COM port disappears.
+        self.com_health_timer = QTimer(self)
+        self.com_health_timer.setInterval(2000)
+        self.com_health_timer.timeout.connect(
+            self._check_com_connection
+        )
+
 
         self.sync_mode = "Internal"
         self.frequency_mode = "Frequency"
@@ -6518,11 +6526,39 @@ class TG10Window(QMainWindow):
 
         return w
 
-
+    
     # ========================================================
     # USB-CAN / BACKEND CONNECTION
     # ========================================================
+    
+    
+    def _check_com_connection(self):
+        """Disconnect the GUI if Windows no longer detects its COM port."""
+        if not self.connection_state or not self.selected_com_port:
+            return
 
+        if list_ports is None:
+            return
+
+        try:
+            available_ports = {
+                port.device for port in list_ports.comports()
+            }
+        except Exception as exc:
+            self.set_status(
+                f"Could not check USB-CAN port: {exc}"
+            )
+            return
+
+        if self.selected_com_port not in available_ports:
+            disconnected_port = self.selected_com_port
+
+            self._close_can_connection()
+
+            self.set_status(
+                f"USB-CAN adapter removed ({disconnected_port})"
+            )
+    
     def _request_disconnect(self):
         """Ask for confirmation before intentionally disconnecting TG10."""
         if not self.connection_state:
@@ -6545,6 +6581,9 @@ class TG10Window(QMainWindow):
 
         # Stop the invisible inactivity refresh immediately when disconnected.
         self._stop_monitor_inactivity_refresh()
+        if hasattr(self, "com_health_timer"):
+            self.com_health_timer.stop()
+        self.com_health_timer.stop()
 
         if self.serial_connection is not None:
             try:
@@ -6617,6 +6656,7 @@ class TG10Window(QMainWindow):
             )
 
             self.connection_state = True
+            self.com_health_timer.start()
             self.connection.setText(
                 f"●  CONNECTED — {port}"
             )
