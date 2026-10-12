@@ -236,18 +236,25 @@ QPushButton#StatusPill:disabled {{
 }}
 
 QPushButton#HdrBtn {{
-    background: white;
-    border: 1px solid {LINE};
+    background: {BLUE};
+    border: 1px solid {BLUE};
     border-radius: 3px;
-    color: #23394f;
+    color: white;
     font-weight: 700;
     min-height: 34px;
     padding: 3px 12px;
 }}
 
-QPushButton#HdrBtn:hover {{
+QPushButton#HdrBtn:hover:!pressed {{
+    background: {BLUE};
     border-color: {BLUE};
-    background: #f2f7fb;
+    color: white;
+}}
+
+QPushButton#HdrBtn:pressed {{
+    background: #FFFFFF;
+    border-color: #FFFFFF;
+    color: {BLUE};
 }}
 
 QPushButton#HdrBtn[active="true"] {{
@@ -526,7 +533,8 @@ QLabel#LiveBody {{
 }}
 
 QPushButton#SmallBtn {{
-    background: white;
+    background: {BLUE};
+    color: white;
     border: 1px solid {LINE};
     border-radius: 2px;
     min-height: 28px;
@@ -536,14 +544,15 @@ QPushButton#SmallBtn {{
 }}
 
 QPushButton#SmallBtn:hover:!pressed {{
-    border-color: {BLUE};
-    background: #f2f7fb;
+    background: {BLUE};
+    border-color: #FFFFFF;
+    color: white;
 }}
 
 QPushButton#SmallBtn:pressed {{
-    background: {BLUE};
-    border-color: {BLUE};
-    color: white;
+    background: #FFFFFF;
+    border-color: #FFFFFF;
+    color: {BLUE};
 }}
 
 QWidget#StatusBar {{
