@@ -2295,6 +2295,26 @@ class TG10Window(QMainWindow):
         if app is not None:
             app.installEventFilter(self)
             
+        
+        def showEvent(self, event):
+            super().showEvent(event)
+
+            if not getattr(self, "_initial_monitor_refresh_scheduled", False):
+                self._initial_monitor_refresh_scheduled = True
+                QTimer.singleShot(
+                    0,
+                    self._initial_monitor_refresh
+                )
+
+        def _initial_monitor_refresh(self):
+            if (
+                self.connection_state
+                and self.serial_connection is not None
+                and self.monitor_backend is not None
+            ):
+                self._refresh_monitor_hardware()
+
+            
     def get_system_clock_hz(self):
         """
         Return the TG10 system clock used for
@@ -6609,12 +6629,18 @@ class TG10Window(QMainWindow):
                 f"Connected to TG10 on {port} | Read 0x52 = 0x{config_value:02X}"
             )
 
-            # Start the invisible 10-second inactivity countdown.
-            # No immediate automatic read is performed here; the first
-            # automatic read occurs only after 10 seconds without user input.
+            
+            # Immediately refresh Monitor after a successful connection.
+            QTimer.singleShot(
+                0,
+                self._refresh_monitor_hardware
+            )
+
+            # Keep the existing 10-second inactivity refresh.
             self._start_monitor_inactivity_refresh()
 
             return True
+
 
         except Exception as exc:
             self._close_can_connection()
