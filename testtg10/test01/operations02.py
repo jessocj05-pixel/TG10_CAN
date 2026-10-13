@@ -77,7 +77,7 @@ def seq_internal_100mhz(
     vco: int = 1,                 # 1 = 3 GHz, 0 = 2.5 GHz
     ratediv: int = 1000,
     *,
-    command_on: bool = True,
+    command_on: bool = False,
 ) -> Sequence:
     """
     Internal 100 MHz oscillator path.
@@ -254,7 +254,7 @@ def seq_oneshot_smart(
 def build_internal_100mhz_from_period(
     period_s: float,
     *,
-    command_on: bool = True,
+    command_on: bool = False,
 ) -> Sequence:
     """
     High-level: user supplies desired period → everything else calculated.
@@ -266,7 +266,7 @@ def build_internal_100mhz_from_period(
         ndiv=cfg.n_divider,
         vco=cfg.vco2_reg,
         ratediv=ratediv,
-        
+
     )
 
 
