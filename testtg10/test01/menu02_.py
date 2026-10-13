@@ -76,6 +76,8 @@ from calculations02_ import (
     clock_internal_100mhz,
     clock_external,
 )
+import ast
+import os
 
 # ---------------------------------------------------------------------------
 # Application state (UI layer only)
@@ -102,6 +104,7 @@ def ask(prompt: str, default: str = "") -> str:
         raw = input(f"{prompt} [{default}]: ").strip()
         return raw if raw else default
     return input(f"{prompt}: ").strip()
+
 
 
 def print_sequence(seq, label: str = "sequence"):
@@ -792,8 +795,12 @@ def menu_load_preset():
 
     try:
         namespace = {}
-        with open(path, "r") as f:
-            exec(f.read(), {}, namespace)
+
+        with open(path, "r", encoding="utf-8") as f:
+            source = f.read()
+
+        exec(compile(source, path, "exec"), {}, namespace)
+
     except FileNotFoundError:
         print("!! preset.py not found")
         return
@@ -801,7 +808,7 @@ def menu_load_preset():
         print(f"!! Error loading preset.py: {e}")
         return
 
-    # Only keep Python-list presets
+    # Find presets defined as Python lists.
     presets = {
         name: value
         for name, value in namespace.items()
@@ -812,37 +819,146 @@ def menu_load_preset():
         print("!! No presets found in preset.py")
         return
 
-    print("\n--- Saved Presets ---")
+    while True:
+        preset_names = list(presets.keys())
 
-    preset_names = list(presets.keys())
+        print("\n--- Saved Presets ---")
 
-    for i, name in enumerate(preset_names, 1):
-        print(f"  {i}) {name}")
+        for i, name in enumerate(preset_names, 1):
+            print(f"  {i}) {name}")
 
-    choice = ask("Select preset", default="1")
+        print("\nL) Load a preset")
+        print("D) Delete a preset")
+        print("Q) Back to main menu")
 
-    try:
-        index = int(choice) - 1
-        if index < 0 or index >= len(preset_names):
-            print("!! Invalid preset number")
+        action = ask("Choose action", default="L").strip().lower()
+
+        # ---------------------------------------------------------
+        # DELETE PRESET
+        # ---------------------------------------------------------
+        if action == "d":
+            choice = ask("Enter preset number to delete")
+
+            try:
+                index = int(choice) - 1
+
+                if index < 0 or index >= len(preset_names):
+                    print("!! Invalid preset number")
+                    continue
+
+            except ValueError:
+                print("!! Enter a valid preset number")
+                continue
+
+            name = preset_names[index]
+
+            confirm = ask(
+                f'Delete preset "{name}" permanently? (y/n)',
+                default="n",
+            ).strip().lower()
+
+            if confirm != "y":
+                print("Deletion cancelled.")
+                continue
+
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+
+                tree = ast.parse("".join(lines))
+                start_line = None
+                end_line = None
+
+                # Find the top-level assignment for this preset.
+                for node in tree.body:
+                    if isinstance(node, ast.Assign):
+                        names = [
+                            target.id
+                            for target in node.targets
+                            if isinstance(target, ast.Name)
+                        ]
+
+                        if name in names:
+                            start_line = node.lineno
+                            end_line = node.end_lineno
+                            break
+
+                    elif isinstance(node, ast.AnnAssign):
+                        if (
+                            isinstance(node.target, ast.Name)
+                            and node.target.id == name
+                        ):
+                            start_line = node.lineno
+                            end_line = node.end_lineno
+                            break
+
+                if start_line is None:
+                    print(f'!! Could not find definition of "{name}"')
+                    continue
+
+                # Remove only the selected assignment.
+                del lines[start_line - 1:end_line]
+
+                temp_path = path + ".tmp"
+
+                with open(temp_path, "w", encoding="utf-8") as f:
+                    f.writelines(lines)
+
+                os.replace(temp_path, path)
+
+                print(f'\nDeleted preset "{name}" from {path}')
+
+                # Reload the available presets after deletion.
+                return_to_load_menu = True
+
+                # Restart this menu with the updated file.
+                menu_load_preset()
+                return
+
+            except Exception as e:
+                print(f"!! Could not delete preset: {e}")
+                return
+
+        # ---------------------------------------------------------
+        # LOAD PRESET
+        # ---------------------------------------------------------
+        elif action == "l":
+            choice = ask("Select preset number", default="1")
+
+            try:
+                index = int(choice) - 1
+
+                if index < 0 or index >= len(preset_names):
+                    print("!! Invalid preset number")
+                    continue
+
+            except ValueError:
+                print("!! Enter a preset number")
+                continue
+
+            name = preset_names[index]
+            seq = presets[name]
+
+            state["current_config"] = {}
+
+            for reg, data in seq:
+                if data is not None:
+                    state["current_config"][reg] = data
+
+            state["last_seq"] = list(seq)
+
+            print(f"\nLoaded preset: {name}")
+            print(f"Sequence contains {len(seq)} entries")
+
+            print_sequence(seq, name)
             return
-    except ValueError:
-        print("!! Enter a preset number")
-        return
 
-    name = preset_names[index]
-    seq = presets[name]
-    state["current_config"] = {}
+        elif action == "q":
+            return
 
-    for reg, data in seq:
-        if data is not None:
-            state["current_config"][reg] = data
-    state["last_seq"] = list(seq)
+        else:
+            print("!! Choose L, D, or Q")
 
-    print(f"\nLoaded preset: {name}")
-    print(f"Sequence contains {len(seq)} entries")
-
-    print_sequence(seq, name)
 
 # ===========================================================================
 # 8. Other
