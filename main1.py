@@ -10,7 +10,8 @@ Requirement:
 """
 import sys
 import os
-import json
+import ast
+import keyword
 
 # ============================================================
 # TG10 BACKEND PATH
@@ -2255,6 +2256,8 @@ class SavePresetsDialog(QDialog):
         root.addLayout(buttons)
 
     def save_preset(self):
+        import keyword
+
         name = self.name_edit.text().strip()
 
         if not name:
@@ -2263,21 +2266,114 @@ class SavePresetsDialog(QDialog):
             )
             return
 
-        try:
-            presets = self.parent_window.read_saved_presets()
+        # Validate the preset name as a Python variable name.
+        if not name.isidentifier() or keyword.iskeyword(name):
+            QMessageBox.warning(
+                self,
+                "Save Presets",
+                "Enter a valid preset name (letters, numbers, and underscores; "
+                "it must not start with a number or be a Python keyword)."
+            )
+            return
 
-            if any(
-                item["name"].casefold() == name.casefold()
-                for item in presets
-            ):
+        try:
+            # Get the register configuration currently tracked by the GUI.
+            menu = getattr(self.parent_window, "menu", None)
+
+            if menu is None:
                 QMessageBox.warning(
-                    self, "Save Presets",
+                    self,
+                    "Save Presets",
+                    "Connect to the TG10 before saving a preset."
+                )
+                return
+
+            config = menu.state.get("current_config", {})
+
+            if not config:
+                QMessageBox.warning(
+                    self,
+                    "Save Presets",
+                    "No configuration is available to save yet."
+                )
+                return
+
+            # Use the existing preset.py file.
+            preset_path = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                "testtg10",
+                "test01",
+                "preset.py"
+            )
+
+            if not os.path.isfile(preset_path):
+                QMessageBox.critical(
+                    self,
+                    "Save Presets",
+                    f"Preset file not found:\n{preset_path}"
+                )
+                return
+
+            # Check existing top-level preset names without executing preset.py.
+            with open(preset_path, "r", encoding="utf-8") as file:
+                source = file.read()
+
+            tree = ast.parse(source, filename=preset_path)
+
+            existing_names = {
+                target.id
+                for node in tree.body
+                if isinstance(node, ast.Assign)
+                for target in node.targets
+                if isinstance(target, ast.Name)
+            }
+
+            if name in existing_names:
+                QMessageBox.warning(
+                    self,
+                    "Save Presets",
                     "A preset with this name already exists."
                 )
                 return
 
-            presets.append({"name": name})
-            self.parent_window.write_saved_presets(presets)
+                        # Validate the tracked register configuration before saving.
+            sequence = []
+
+            for reg, data in config.items():
+                if (
+                    not isinstance(reg, int)
+                    or isinstance(reg, bool)
+                    or not 0 <= reg <= 0xFF
+                ):
+                    raise ValueError(
+                        f"Invalid register address: {reg!r}"
+                    )
+
+                if data is None:
+                    continue
+
+                if not isinstance(data, bytes):
+                    raise ValueError(
+                        f"Register 0x{reg:02X} must have a bytes payload."
+                    )
+
+                sequence.append((reg, data))
+
+            if not sequence:
+                QMessageBox.warning(
+                    self,
+                    "Save Presets",
+                    "There are no register values available to save."
+                )
+                return
+
+            with open(preset_path, "a", encoding="utf-8") as file:
+                file.write(f"\n\n{name} = [\n")
+
+                for reg, data in sequence:
+                    file.write(f"    (0x{reg:02X}, {data!r}),\n")
+
+                file.write("]\n")
 
             QMessageBox.information(
                 self, "Save Presets",
@@ -2360,11 +2456,64 @@ class LoadPresetsDialog(QDialog):
     def refresh_presets(self):
         """Populate rows from the existing preset manager when available."""
         self.table.setRowCount(0)
-
-        # Do not invent preset names or pretend sample entries are saved.
-        # Connect the existing persistence source here.
+        preset_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "testtg10",
+            "test01",
+            "preset.py"
+        )
         try:
-            presets = self.parent_window.read_saved_presets()
+            if not os.path.isfile(preset_path):
+                raise FileNotFoundError(
+                    f"Preset file not found:\n{preset_path}"
+                )
+
+            with open(preset_path, "r", encoding="utf-8") as file:
+                source = file.read()
+
+            tree = ast.parse(source, filename=preset_path)
+            presets = []
+
+            for node in tree.body:
+                if not isinstance(node, ast.Assign):
+                    continue
+
+                if len(node.targets) != 1:
+                    continue
+
+                target = node.targets[0]
+
+                if not isinstance(target, ast.Name):
+                    continue
+
+                if target.id.startswith("_"):
+                    continue
+
+                # Only list-valued literal presets are accepted.
+                if not isinstance(node.value, ast.List):
+                    continue
+
+                                # Validate the list structure without evaluating
+                # bytes() or .to_bytes() expressions.
+                if not all(
+                    isinstance(item, (ast.Tuple, ast.List))
+                    and len(item.elts) == 2
+                    for item in node.value.elts
+                ):
+                    continue
+
+                presets.append(target.id)
+
+            for index, name in enumerate(presets, start=1):
+                row = self.table.rowCount()
+                self.table.insertRow(row)
+                self.table.setItem(
+                    row, 0, QTableWidgetItem(str(index))
+                )
+                self.table.setItem(
+                    row, 1, QTableWidgetItem(name)
+                )
+        
         except Exception as exc:
             QMessageBox.warning(
                 self, "Load Presets",
@@ -2372,18 +2521,6 @@ class LoadPresetsDialog(QDialog):
             )
             return
 
-        for index, preset in enumerate(presets, start=1):
-            if isinstance(preset, tuple) and len(preset) == 2:
-                name = str(preset[0])
-            elif isinstance(preset, dict):
-                name = str(preset.get("name", f"Preset {index}"))
-            else:
-                name = str(preset)
-
-            row = self.table.rowCount()
-            self.table.insertRow(row)
-            self.table.setItem(row, 0, QTableWidgetItem(str(index)))
-            self.table.setItem(row, 1, QTableWidgetItem(name))
 
     def delete_selected(self):
         row = self.table.currentRow()
@@ -2410,14 +2547,63 @@ class LoadPresetsDialog(QDialog):
         if answer != QMessageBox.StandardButton.Yes:
             return
 
+        preset_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "testtg10", "test01", "preset.py"
+        )
+
         try:
-            presets = self.parent_window.read_saved_presets()
-            presets = [
-                item for item in presets
-                if item["name"] != name
+            with open(preset_path, "r", encoding="utf-8") as file:
+                source = file.read()
+
+            tree = ast.parse(source, filename=preset_path)
+            
+            matching_nodes = [
+                node for node in tree.body
+                if isinstance(node, ast.Assign)
+                and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and node.targets[0].id == name
+                and isinstance(node.value, ast.List)
             ]
-            self.parent_window.write_saved_presets(presets)
+
+            if len(matching_nodes) != 1:
+                QMessageBox.warning(
+                    self, "Delete Preset",
+                    f'Expected exactly one preset named "{name}". '
+                    "No changes were made."
+                )
+                self.refresh_presets()
+                return
+
+            target = matching_nodes[0]
+
+            # Remove only the selected assignment, including its
+            # immediately preceding comment-only lines, if present.
+            lines = source.splitlines(keepends=True)
+            start = target.lineno - 1
+            end = target.end_lineno
+
+            while start > 0 and lines[start - 1].strip().startswith("#"):
+                start -= 1
+
+            del lines[start:end]
+
+            updated_source = "".join(lines)
+
+            # Validate the remaining Python before writing it.
+            ast.parse(updated_source, filename=preset_path)
+
+            with open(preset_path, "w", encoding="utf-8", newline="") as file:
+                file.write(updated_source)
+
             self.refresh_presets()
+            
+            QMessageBox.information(
+                self, "Delete Preset",
+                f'Preset "{name}" deleted successfully.'
+            )
+        
         except Exception as exc:
             QMessageBox.critical(
                 self, "Delete Preset",
@@ -2433,12 +2619,181 @@ class LoadPresetsDialog(QDialog):
             )
             return
 
-        QMessageBox.information(
-            self,
-            "Load Preset",
-            "Connect this action to the existing preset-restoration "
-            "function before applying settings."
+        name_item = self.table.item(row, 1)
+        if name_item is None:
+            return
+
+        name = name_item.text()
+        parent = self.parent_window
+
+        if not getattr(parent, "connection_state", False):
+            QMessageBox.warning(
+                self, "Load Preset",
+                "Please connect to the TG10 before loading a preset."
+            )
+            return
+
+        preset_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "testtg10", "test01", "preset.py"
         )
+
+        try:
+            with open(preset_path, "r", encoding="utf-8") as file:
+                source = file.read()
+
+            # namespace = {}
+            # exec(compile(source, preset_path, "exec"), {}, namespace)
+
+            # sequence = namespace.get(name)
+            
+            tree = ast.parse(source, filename=preset_path)
+
+            # Find only the selected preset assignment.
+            matching_presets = [
+                node for node in tree.body
+                if isinstance(node, ast.Assign)
+                and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and node.targets[0].id == name
+                and isinstance(node.value, ast.List)
+            ]
+
+            if len(matching_presets) != 1:
+                QMessageBox.warning(
+                    self, "Load Preset",
+                    f'Expected exactly one preset named "{name}".'
+                )
+                return
+
+            preset_node = matching_presets[0]
+
+            if preset_node is None:
+                QMessageBox.warning(
+                    self, "Load Preset",
+                    f'Preset "{name}" was not found.'
+                )
+                return
+
+            def evaluate_preset_value(node):
+                """Evaluate only the expression forms used in preset.py."""
+                if isinstance(node, ast.Constant):
+                    if isinstance(node.value, (int, str, bytes, type(None))):
+                        return node.value
+                    raise ValueError("Unsupported preset constant.")
+
+                if isinstance(node, (ast.List, ast.Tuple)):
+                    values = [
+                        evaluate_preset_value(item)
+                        for item in node.elts
+                    ]
+                    return values if isinstance(node, ast.List) else tuple(values)
+
+                if isinstance(node, ast.Call) and not node.keywords:
+                    # Supports bytes([0x01]).
+                    if (
+                        isinstance(node.func, ast.Name)
+                        and node.func.id == "bytes"
+                        and len(node.args) == 1
+                    ):
+                        values = evaluate_preset_value(node.args[0])
+                        if not isinstance(values, (list, tuple)):
+                            raise ValueError("Invalid bytes() argument.")
+                        if not all(
+                            isinstance(value, int)
+                            and not isinstance(value, bool)
+                            and 0 <= value <= 255
+                            for value in values
+                        ):
+                            raise ValueError("Invalid byte value.")
+                        return bytes(values)
+
+                    # Supports (30).to_bytes(4, "little").
+                    if (
+                        isinstance(node.func, ast.Attribute)
+                        and node.func.attr == "to_bytes"
+                        and len(node.args) == 2
+                    ):
+                        number = evaluate_preset_value(node.func.value)
+                        width = evaluate_preset_value(node.args[0])
+                        byteorder = evaluate_preset_value(node.args[1])
+
+                        if (
+                            not isinstance(number, int)
+                            or isinstance(number, bool)
+                            or not isinstance(width, int)
+                            or isinstance(width, bool)
+                            or width <= 0
+                            or byteorder != "little"
+                        ):
+                            raise ValueError(
+                                "Unsupported to_bytes() arguments."
+                            )
+
+                        return number.to_bytes(width, byteorder)
+
+                raise ValueError(
+                    f"Unsupported expression in preset '{name}'."
+                )
+
+            sequence = evaluate_preset_value(preset_node.value)
+
+            if not isinstance(sequence, list):
+                QMessageBox.warning(
+                    self, "Load Preset",
+                    f'Preset "{name}" was not found.'
+                )
+                return
+
+            if not sequence:
+                QMessageBox.warning(
+                    self, "Load Preset",
+                    "The selected preset contains no register writes."
+                )
+                return
+
+            for item in sequence:
+                if not isinstance(item, (tuple, list)) or len(item) != 2:
+                    raise ValueError("Invalid register sequence format.")
+
+                reg, data = item
+
+                if (
+                    not isinstance(reg, int)
+                    or isinstance(reg, bool)
+                    or not 0 <= reg <= 0xFF
+                ):
+                    raise ValueError("Invalid register address.")
+
+                if data is not None and not isinstance(data, bytes):
+                    raise ValueError(
+                        f"Register 0x{reg:02X} has an invalid payload."
+                    )
+
+            parent.can_backend.send_sequence(
+                parent.serial_connection,
+                sequence,
+                label=f"TG10 Preset: {name}"
+            )
+
+            parent.menu.state["current_config"] = {
+                reg: data
+                for reg, data in sequence
+                if data is not None
+            }
+            parent.menu.state["last_seq"] = list(sequence)
+
+            QMessageBox.information(
+                self, "Load Preset",
+                f'Preset "{name}" sent successfully.'
+            )
+            self.accept()
+
+        except Exception as exc:
+            QMessageBox.critical(
+                self, "Load Preset",
+                f"Could not load preset:\n{exc}"
+            )
 
         
 # ============================================================
@@ -3635,7 +3990,7 @@ class TG10Window(QMainWindow):
             sequence,
             label="TG10 Sync"
         )
-
+        self.menu.update_current_config(sequence)
         # Read back the actual hardware state
         status = self._read_sync_hardware_status()
         detected = self._apply_hardware_sync_status(status)
@@ -3955,7 +4310,8 @@ class TG10Window(QMainWindow):
                     sequence,
                     label="TG10 External SYNC IN"
                 )
-
+                self.menu.update_current_config(sequence)
+                
                 self._commit_frequency_to_monitor()
 
                 self.set_status(
@@ -4010,6 +4366,10 @@ class TG10Window(QMainWindow):
                 sequence,
                 label="TG10 Frequency / Period"
             )
+            
+            # Track the successfully applied register values for presets.
+            if getattr(self, "menu", None) is not None:
+                self.menu.update_current_config(sequence)
 
             # 7. Update GUI monitor values
             self._commit_frequency_to_monitor()
@@ -4199,7 +4559,7 @@ class TG10Window(QMainWindow):
                 set2_src=set2_src,
                 res2_src=res2_src,
                 logic_mux=logic_mux,
-                command_on=True,
+                command_on=False,
             )
 
             # 7. Send using the existing CAN backend.
@@ -4216,6 +4576,9 @@ class TG10Window(QMainWindow):
                 sequence,
                 label=f"TG10 {channel_text} Output"
             )
+            
+            self.menu.update_current_config(sequence)
+
 
             # 8. Update Monitor only after send_sequence returns successfully.
             self._commit_output_to_monitor()
@@ -4802,184 +5165,6 @@ class TG10Window(QMainWindow):
             self.config_divider_widget.setEnabled(divider_enabled)
             
     
-    # def _set_config_hardware(self):
-    #     """Apply the selected Configuration 1/2 mode using existing sequences."""
-
-    #     if not self.connection_state or self.serial_connection is None:
-    #         QMessageBox.warning(
-    #             self,
-    #             "TG10 Not Connected",
-    #             "Connect to the TG10 before applying configuration settings."
-    #         )
-    #         return
-
-    #     try:
-    #         settings = self.config_settings[self.active_config_name]
-    #         mode = settings["mode"]
-
-    #         if mode == "Normal":
-    #             sequence = self.operations.seq_config_normal()
-
-    #         elif mode == "Gate":
-    #             gate_mode = settings.get("gate", "GATE")
-
-    #             if gate_mode == "GATE":
-    #                 sequence = self.operations.seq_config_gate()
-    #             elif gate_mode == "nGATE":
-    #                 sequence = self.operations.seq_config_ngate()
-    #             else:
-    #                 raise ValueError(f"Unsupported Gate selection: {gate_mode}")
-
-    #         elif mode == "Burst":
-    #             burst_sources = {
-    #                 "SYNC IN": 0,
-    #                 "GATE": 1,
-    #                 "nGATE": 2,
-    #                 "Software": 3,
-    #             }
-
-    #             source_name = settings.get("burst_source", "SYNC IN")
-    #             if source_name not in burst_sources:
-    #                 raise ValueError(
-    #                     f"Unsupported Burst trigger source: {source_name}"
-    #                 )
-
-    #             sequence = self.operations.seq_config_burst(
-    #                 burst_trig_src=burst_sources[source_name],
-    #                 burst_count=int(settings.get("burst_count", 1)),
-    #                 f_div=int(settings.get("divider", 1)),
-    #             )
-
-    #         elif mode == "Frequency divider":
-    #             sequence = self.operations.seq_config_freq_div(
-    #                 f_div=int(settings.get("divider", 1))
-    #             )
-
-    #         else:
-    #             raise ValueError(f"Unsupported configuration mode: {mode}")
-
-    #         self.set_status(f"Applying {mode} configuration...")
-    #         QApplication.processEvents()
-
-    #         self.can_backend.send_sequence(
-    #             self.serial_connection,
-    #             sequence,
-    #             label=f"TG10 {self.active_config_name} - {mode}",
-    #         )
-
-    #         self._commit_config_to_monitor()
-    #         self.set_status(
-    #             f"{self.active_config_name} - {mode} configuration sent."
-    #         )
-
-    #     except Exception as exc:
-    #         self.set_status("Configuration application failed.")
-    #         QMessageBox.critical(
-    #             self,
-    #             "TG10 Configuration Error",
-    #             f"Could not apply configuration settings:\n\n{exc}",
-    #         )
-
-    
-    # def _set_config_hardware(self):
-    #     """Apply the selected Configuration mode to the connected TG10."""
-    #     if (
-    #         not self.connection_state
-    #         or self.serial_connection is None
-    #     ):
-    #         QMessageBox.warning(
-    #             self,
-    #             "TG10 Not Connected",
-    #             "Connect to the TG10 before applying configuration settings."
-    #         )
-    #         return
-
-    #     if self.can_backend is None or self.operations is None:
-    #         QMessageBox.critical(
-    #             self,
-    #             "TG10 Configuration Error",
-    #             "The CAN backend or operations module is not loaded."
-    #         )
-    #         return
-
-    #     try:
-    #         settings = self.config_settings[self.active_config_name]
-    #         mode = settings["mode"]
-
-    #         if mode == "Normal":
-    #             sequence = self.operations.seq_config_normal()
-
-    #         elif mode == "Gate":
-    #             gate_mode = settings.get("gate", "GATE")
-
-    #             if gate_mode == "GATE":
-    #                 sequence = self.operations.seq_config_gate()
-    #             elif gate_mode == "nGATE":
-    #                 sequence = self.operations.seq_config_ngate()
-    #             else:
-    #                 raise ValueError(
-    #                     f"Unsupported Gate selection: {gate_mode}"
-    #                 )
-
-    #         elif mode == "Burst":
-    #             burst_sources = {
-    #                 "SYNC IN": 0,
-    #                 "GATE": 1,
-    #                 "nGATE": 2,
-    #                 "Software": 3,
-    #             }
-
-    #             source_name = settings.get("burst_source", "SYNC IN")
-
-    #             if source_name not in burst_sources:
-    #                 raise ValueError(
-    #                     f"Unsupported Burst trigger: {source_name}"
-    #                 )
-
-    #             sequence = self.operations.seq_config_burst(
-    #                 burst_trig_src=burst_sources[source_name],
-    #                 burst_count=int(settings.get("burst_count", 1)),
-    #                 f_div=int(settings.get("divider", 1)),
-    #             )
-
-    #         elif mode == "Frequency divider":
-    #             sequence = self.operations.seq_config_freq_div(
-    #                 f_div=int(settings.get("divider", 1))
-    #             )
-
-    #         else:
-    #             raise ValueError(
-    #                 f"Unsupported configuration mode: {mode}"
-    #             )
-
-    #         self.set_status(f"Applying {mode} configuration...")
-    #         QApplication.processEvents()
-
-    #         self.can_backend.send_sequence(
-    #             self.serial_connection,
-    #             sequence,
-    #             label=f"TG10 {self.active_config_name} - {mode}"
-    #         )
-
-    #         self.committed_config_name = self.active_config_name
-
-    #         self.set_status(
-    #             f"{self.active_config_name} - {mode} configuration sent."
-    #         )
-
-    #         # Read back the hardware after the write completes.
-    #         self._update_monitor_values()
-
-    #     except Exception as exc:
-    #         self.set_status("Configuration application failed.")
-
-    #         QMessageBox.critical(
-    #             self,
-    #             "TG10 Configuration Error",
-    #             f"Could not apply configuration settings:\n\n{exc}"
-    #         )
-
-    
     def _set_config_hardware(self):
         """Send the selected configuration using existing operation builders."""
         if not self.connection_state or self.serial_connection is None:
@@ -5031,6 +5216,10 @@ class TG10Window(QMainWindow):
                 sequence,
                 label=f"TG10 {self.active_config_name} - {mode}"
             )
+            
+            # Update menu02's accumulated register configuration.
+            if getattr(self, "menu", None) is not None:
+                self.menu.update_current_config(sequence)
 
             self.committed_config_name = self.active_config_name
             self.set_status(f"{self.active_config_name}: {mode} settings sent.")
@@ -5042,8 +5231,6 @@ class TG10Window(QMainWindow):
                 "TG10 Configuration Error",
                 f"Could not apply configuration:\n{exc}"
             )
-
-
     
     def _commit_config_to_monitor(self):
         self.committed_config_name = self.active_config_name
@@ -5333,13 +5520,14 @@ class TG10Window(QMainWindow):
             return
         channel = self.output_channel.currentText()
         logic_available = channel in {"OUT2", "OUT3", "OUT4", "OUT5"}
-        self.output_logic.setEnabled(logic_available)
+        #self.output_logic.setEnabled(logic_available)
         self.output_logic.blockSignals(True)
-        if not logic_available:
-            self.output_logic.setCurrentText("NA")
-        elif self.output_logic.currentText() == "NA":
-            self.output_logic.setCurrentText("OR")
-        self.output_logic.blockSignals(False)
+        try:
+            self.output_logic.setEnabled(logic_available)
+            if not logic_available:
+                self.output_logic.setCurrentText("NA")
+        finally:
+            self.output_logic.blockSignals(False)
 
     def _output_condition_changed(self, *_):
         """Refresh delay readbacks and calculate both pulse widths."""
@@ -5358,14 +5546,21 @@ class TG10Window(QMainWindow):
 
             try:
                 seconds = self._get_output_condition_seconds(condition)
-            except (RuntimeError, ValueError, AttributeError):
-                seconds = None
+                
+                if seconds is None:
+                    display.setText("---")
+                    continue
 
-            if seconds is None:
-                display.setText("---")
-            else:
                 display.setText(self._format_output_delay(seconds))
                 values[id(selector)] = seconds
+                
+            except Exception as exc:
+                display.setText("---")
+                print(
+                    f"OUTPUT READBACK ERROR | "
+                    f"Condition={condition!r} | "
+                    f"{type(exc).__name__}: {exc}"
+                )
 
         self._update_output_pulse_width(
             self.output_c1_pulse,
@@ -5389,6 +5584,11 @@ class TG10Window(QMainWindow):
             return None
 
         frequency = self.get_system_clock_hz()
+        print("OUTPUT READBACK DEBUG")
+        print("  Condition:", condition)
+        print("  Serial connection:", ser)
+        print("  Monitor backend:", monitor)
+        print("  System clock:", frequency)
 
         if condition.startswith("post DEL"):
             channel = int(condition[len("post DEL"):])
@@ -5411,7 +5611,16 @@ class TG10Window(QMainWindow):
             if not 0 <= channel <= 7:
                 return None
 
-            return monitor._delay_seconds(ser, channel, frequency)
+            try:
+                seconds = monitor._delay_seconds(ser, channel, frequency)
+                print(f"  DEL{channel} readback: {seconds!r} seconds")
+                return seconds
+            except Exception as exc:
+                print(
+                    f"  DEL{channel} ERROR: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+                raise
 
         return None
 
@@ -6923,12 +7132,13 @@ class TG10Window(QMainWindow):
             # self.connection.setToolTip(
             #     "Click here to disconnect from the TG10 USB-CAN device"
             # )
-            if hasattr(self, "connection"):
-                self.connection.setEnabled(True)
+            
             self.set_status(
                 f"Connected to TG10 on {port} | Read 0x52 = 0x{config_value:02X}"
             )
-
+            
+            # Refresh Output timing readbacks after connection succeeds.
+            self._output_condition_changed()
             
             # Immediately refresh Monitor after a successful connection.
             QTimer.singleShot(
