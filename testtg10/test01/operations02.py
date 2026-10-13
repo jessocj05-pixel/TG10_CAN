@@ -266,7 +266,7 @@ def build_internal_100mhz_from_period(
         ndiv=cfg.n_divider,
         vco=cfg.vco2_reg,
         ratediv=ratediv,
-        command_on=command_on,
+        
     )
 
 
@@ -288,7 +288,6 @@ def build_external_clkin_from_period(
         ndiv=cfg.n_divider,
         vco=cfg.vco2_reg,
         ratediv=ratediv,
-        command_on=command_on,
         include_readback=include_readback,
     )
 
@@ -306,7 +305,6 @@ def build_external_syncin(
         ndiv=ndiv,
         vco=vco,
         ratediv=ratediv,
-        command_on=command_on,
     )
 
 from calculations02_ import calc_rate_divider
@@ -331,7 +329,6 @@ def build_external_dual_in_from_period(
         ndiv=cfg.n_divider,
         vco=cfg.vco2_reg,
         ratediv=ratediv,
-        command_on=command_on,
     )
 
 
@@ -368,7 +365,7 @@ def seq_delay_channel(
     Hardware constraints:
         CH0-3,5,6 : Counter + D-delay + A-delay
         CH4       : Counter + A-delay only
-        CH7       : Counter + shared D-delay
+        CH7       : Counter only
     """
     if channel not in _DELAY_MAP:
         raise ValueError(f"unknown delay channel {channel}")
@@ -380,7 +377,7 @@ def seq_delay_channel(
 
     if d_delay is not None:
         if info["d"] is None:
-            raise ValueError(f"channel {channel} has no D-delay ")
+            raise ValueError(f"channel {channel} has no D-delay (CH4/CH7)")
         seq.append((info["d"], _u8(d_delay)))       # DdlyN
 
     if a_delay is not None:
@@ -540,6 +537,29 @@ def seq_config_freq_div(f_div: int = 1) -> Sequence:
         (0x69, _u16(fdiv_clamp(f_div))),            # Fdiv
     ]
 
+
+
+def seq_oneshot_trigger_fire()-> Sequence:
+    return [
+        (0x70, bytes([0x01])),   # OSTrig = START
+        (0x70, bytes([0x00])),   # OSTrig = clear
+    ]
+def seq_burst_trigger_fire()-> Sequence:
+    return [
+        (0x71, bytes([0x01])),   # OSTrig = START
+        (0x71, bytes([0x00])),   # OSTrig = clear
+    ]
+def seq_latch_set_trigger_fire()-> Sequence:
+    return [
+        (0x72, bytes([0x01])),   # OSTrig = START
+        (0x72, bytes([0x00])),   # OSTrig = clear
+    ]
+
+def seq_latch_reset_trigger_fire()-> Sequence:
+    return [
+        (0x73, bytes([0x01])),   # OSTrig = START
+        (0x73, bytes([0x00])),   # OSTrig = clear
+    ]
 
 # ===========================================================================
 # 5. Output channel configuration (OUT0–OUT7)

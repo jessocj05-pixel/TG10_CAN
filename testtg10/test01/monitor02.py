@@ -69,36 +69,17 @@ def fmt_period(p):
         return f"{p*1e3:.3f} ms"
     return f"{p:.6f} s"
 
+def fmt_delay(total_s: float, F: float) -> str:
+    """Pick display granularity like TG10 does: full/D+A/A-only."""
+    coarse_step = 28.0 / F      # ~9.33 ns
+    fine_step   = 1.0 / F       # ~0.333 ns
 
-# def fmt_delay(total_s: float, F: float) -> str:
-#     """Pick display granularity like TG10 does: full/D+A/A-only."""
-#     coarse_step = 28.0 / F      # ~9.33 ns
-#     fine_step   = 1.0 / F       # ~0.333 ns
-
-#     if total_s >= coarse_step:
-#         return fmt_period(total_s)
-#     elif total_s >= fine_step:
-#         return f"{total_s*1e12:.2f} ps"
-#     else:
-#         return f"{total_s*1e12:.2f} ps"
-
-
-def fmt_delay(total_s: float, F: float = None) -> str:
-    """Auto-pick ps/ns/us/ms/s purely by magnitude, like the device display."""
-    if total_s is None:
-        return "n/a"
-    a = abs(total_s)
-    if a == 0:
-        return "0.00 ps"
-    if a < 1e-9:
+    if total_s >= coarse_step:
+        return fmt_period(total_s)
+    elif total_s >= fine_step:
         return f"{total_s*1e12:.2f} ps"
-    if a < 1e-6:
-        return f"{total_s*1e9:.3f} ns"
-    if a < 1e-3:
-        return f"{total_s*1e6:.3f} us"
-    if a < 1:
-        return f"{total_s*1e3:.3f} ms"
-    return f"{total_s:.6f} s"
+    else:
+        return f"{total_s*1e12:.2f} ps"
 
 
 # ---------- main ----------
@@ -292,7 +273,6 @@ def _delay_seconds(ser, ch, F):
         t += (_rd(ser, r["d"]) - 4) / F
     if r["a"]:
         t += _rd(ser, r["a"]) * 25e-12
-        # t += _rd(ser, r["a"]) * 25.64e-12
     return max(t, 0.0)                             # clamp, avoid tiny negative float noise
 
 def _src_text(ser, name, F, cache, block, kind):
@@ -409,40 +389,5 @@ def read_logic_out(ser: serial.Serial, outs=(2, 3, 4, 5), show: bool = True) -> 
 
         if show:
             print(f"OUT{n} Logic (0x{reg:02X}) : {val} -> {name}")
-    return res
-
-DEL_NAME = {0: "Fine del0", 1: "Fine del1", 2: "Fine del2", 3: "Fine del3",
-            4: "Fine del4", 5: "Fine del5", 6: "Coarse del6", 7: "Coarse del7"}
-
-
-
-def read_all_delays(ser: serial.Serial, channels=range(8), show: bool = True) -> dict:
-    """Read total delay + post-count for each channel 0..7."""
-    F = _sys_clock_hz(ser)
-    res = {}
-
-    for ch in channels:
-        t = _delay_seconds(ser, ch, F)
-        delay_text = f"{DEL_NAME[ch]} ({fmt_delay(t, F)})"
-
-        post_cnt = _rd(ser, 0x26 + ch)
-        if ch == 4:
-            post_s = post_cnt * 10e-9
-        else:
-            post_s = post_cnt * 28.0 / F
-        post_text = f"Post-count ({fmt_period(post_s)})"
-
-        res[ch] = {
-            "delay_seconds": t,
-            "delay_text": delay_text,
-            "post_seconds": post_s,
-            "post_text": post_text,
-        }   
-
-    if show:
-        for ch in channels:
-            r = res[ch]
-            print(f"{r['delay_text']:<28} {r['post_text']}")
-
     return res
 

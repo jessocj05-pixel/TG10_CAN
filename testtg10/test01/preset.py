@@ -130,47 +130,19 @@ hardcheck = [
     (0x50, bytes([0x01])),                        # MuxDAC = 1
 ]
 
-
-
-
-preset_2 = [
-    (0x10, b'\x00'),
-    (0x75, b'\x00'),
-    (0x11, b'd'),
-    (0x12, b'\x1e\x00\x00\x00'),
-    (0x6D, b'\x01'),
-    (0x55, b'\x00'),
-    (0x54, b'\x00'),
-    (0x20, b'\x01\x00\x00\x00'),
-    (0x26, b'"\x00'),
-    (0x27, b'\x16\x00'),
-    (0x28, b' \x00'),
-    (0x29, b'+\x00'),
-    (0x2A, b'2\x00'),
-    (0x2B, b'A\x00'),
-    (0x2C, b'K\x00'),
-    (0x2D, b'V\x00'),
-    (0x80, b'\x03\x00\x00\x00'),
-    (0x5D, b'\x1f'),
-    (0x56, b'\x01'),
-    (0x16, b'!\x00\x00\x00'),
-    (0x5E, b'\r'),
-    (0x57, b'\x01'),
-    (0x19, b'F\x00\x00\x00'),
-    (0x5F, b'\x12'),
-    (0x58, b'\x00'),
-    (0x1A, b'f\x00\x00\x00'),
-    (0x60, b'\r'),
-    (0x59, b'\x00'),
-    (0x1B, b'\x19\x00\x00\x00'),
-    (0x5A, b'\x17'),
-    (0x1C, b"'\x00\x00\x00"),
-    (0x62, b'\x0f'),
-    (0x5B, b'\r'),
-    (0x1D, b':\x00\x00\x00'),
-    (0x63, b'\x08'),
-    (0x5C, b'\r'),
-    (0x1E, b'>\x00\x00\x00'),
+priya = [
+    (0x10, bytes([0x00])),                        # Command = 0
+    (0x75, bytes([0x00])),                        # OscClkMux = 0
+    (0x11, bytes([0x64])),                        # OscClock = 100
+    (0x12, (30).to_bytes(4, "little")),           # Ndiv = 30
+    (0x6D, bytes([0x01])),                        # VCO = 1
+    (0x55, bytes([0x00])),                        # MuxRateClk = 0
+    (0x54, bytes([0x00])),                        # MuxStartTrg = 0
+    (0x20, (1000).to_bytes(4, "little")),         # Ratediv = 1000
+    (0x1B, (10).to_bytes(4, "little")),           # DelayCnt4 = 10
+    (0x5A, bytes([0x0B])),                        # Adly4 = 11
+    (0x1E, (12).to_bytes(4, "little")),           # DelayCnt7 = 12
+    (0x1D, (11).to_bytes(4, "little")),           # DelayCnt6 = 11
+    (0x63, bytes([0x1A])),                        # Ddly6 = 26
+    (0x5C, bytes([0x01])),                        # Adly6 = 1
 ]
-
-

@@ -12,7 +12,7 @@ import menu02_ as menu_mod          # the file you pasted (menu.py)
 # ────────────────────────────────────────────────
 # Serial settings
 # ────────────────────────────────────────────────
-
+PORT     = "COM21"               # ← change to your port
 BAUDRATE = 2000000
 TIMEOUT  = 0.5
 
