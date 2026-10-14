@@ -2554,36 +2554,45 @@ class TG10Window(QMainWindow):
                 self._refresh_monitor_hardware()
 
             
-    def get_system_clock_hz(self):
-        """
-        Return the TG10 system clock used for
-        Frequency/Period RateDiv and delay calculations.
-        """
+def get_system_clock_hz(self):
+    """
+    Return the TG10 system/PLL clock frequency in Hz.
+    """
 
-        mode = self.sync_mode
+    mode = self.sync_mode
+    calc = self.calculations
 
-        if mode == "Internal":
-            return 3_000_000_000.0
+    if mode == "Internal":
+        return calc.clock_internal_100mhz().f_hz
 
-        elif mode == "External SINGLE IN":
-            source = self._single_source_name()
+    elif mode == "External SINGLE IN":
+        source = self._single_source_name()
 
-            if source == "CLK IN":
-                return 3_000_000_000.0
+        if source == "CLK IN":
+            fext_hz = self._sync_value_to_hz(
+                self.external_rate.value(),
+                self.single_rate_unit.currentText()
+            )
 
-            elif source == "SYNC IN":
-                raise ValueError(
-                    "External SINGLE IN -> SYNC IN system-clock "
-                    "calculation is not defined yet."
-                )
+            cfg = calc.clock_external(fext_hz)
+            return cfg.f_hz
 
-        elif mode == "External DUAL IN":
-            return 3_000_000_000.0
+        elif source == "SYNC IN":
+            raise ValueError(
+                "External SINGLE IN -> SYNC IN uses the "
+                "external sync-trigger path; its system-clock "
+                "configuration must be determined separately."
+            )
 
-        elif mode == "One shot trigger":
-            return 3_000_000_000.0
+    elif mode == "External DUAL IN":
+        # Retain existing behavior until the PLL clock source
+        # for this mode is confirmed.
+        return calc.clock_internal_100mhz().f_hz
 
-        return 3_000_000_000.0
+    elif mode in ("One shot trigger", "One-shot"):
+        return calc.clock_internal_100mhz().f_hz
+
+    raise ValueError(f"Unsupported sync mode: {mode}")
 
     # ========================================================
     # HEADER
