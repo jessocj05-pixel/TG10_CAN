@@ -5,74 +5,100 @@
 
 
 
-p300ns_500ns = [
-    (0x10, b'\x00'),
-    (0x2E, b'\x03'),
-    (0x30, b'\x04'),
-    (0x2F, b'\x03'),
-    (0x31, b'\x04'),
-    (0x36, b'\x03'),
-    (0x38, b'\x04'),
-    (0x37, b'\x05'),
-    (0x39, b'\x06'),
-    (0x7A, b'\x00'),
-    (0x52, b'\x01'),
-    (0x80, b'\x03\x00\x00\x00'),
-    (0x5D, b'\x04'),
-    (0x56, b'\x01'),
-    (0x16, b'#\x00\x00\x00'),
-    (0x5E, b'\x08'),
-    (0x57, b'\x00'),
-    (0x19, b'8\x00\x00\x00'),
-    (0x5F, b'\x14'),
-    (0x58, b'\x00'),
-    (0x1A, b'X\x00\x00\x00'),
-    (0x60, b'\x18'),
-    (0x59, b'\x00'),
-    (0x1B, b'\x19\x00\x00\x00'),
-    (0x5A, b'\x00'),
-    (0x1C, b'&\x00\x00\x00'),
-    (0x62, b'\r'),
-    (0x5B, b'\r'),
-    (0x1D, b'8\x00\x00\x00'),
-    (0x63, b'\x16'),
-    (0x5C, b'\r'),
-    (0x1E, b'=\x00\x00\x00'),
-    (0x20, b'\xc8\x00\x00\x00'),
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+preset300ns_500ns = [
+    (0x10, bytes([0x00])),
+    (0x2E, bytes([0x03])),
+    (0x30, bytes([0x04])),
+    (0x2F, bytes([0x03])),
+    (0x31, bytes([0x04])),
+    (0x36, bytes([0x03])),
+    (0x38, bytes([0x04])),
+    (0x37, bytes([0x05])),
+    (0x39, bytes([0x06])),
+    (0x7A, bytes([0x00])),
+    (0x52, bytes([0x01])),
+    (0x80, (3).to_bytes(4, "little")),
+    (0x5D, bytes([0x04])),
+    (0x56, bytes([0x01])),
+    (0x16, (35).to_bytes(4, "little")),
+    (0x5E, bytes([0x08])),
+    (0x57, bytes([0x00])),
+    (0x19, (56).to_bytes(4, "little")),
+    (0x5F, bytes([0x14])),
+    (0x58, bytes([0x00])),
+    (0x1A, (88).to_bytes(4, "little")),
+    (0x60, bytes([0x18])),
+    (0x59, bytes([0x00])),
+    (0x1B, (25).to_bytes(4, "little")),
+    (0x5A, bytes([0x00])),
+    (0x1C, (38).to_bytes(4, "little")),
+    (0x62, bytes([0x0D])),
+    (0x5B, bytes([0x0D])),
+    (0x1D, (56).to_bytes(4, "little")),
+    (0x63, bytes([0x16])),
+    (0x5C, bytes([0x0D])),
+    (0x1E, (61).to_bytes(4, "little")),
+    (0x20, (100).to_bytes(4, "little")),
+    (0x75, bytes([0x00])),
+    (0x11, bytes([0x64])),
+    (0x12, (30).to_bytes(4, "little")),
+    (0x6D, bytes([0x01])),
+    (0x55, bytes([0x00])),
+    (0x54, bytes([0x00])),
 ]
 
 
-POCKEL_CELL_DRIVER_OUT0_X1___1_CHANNEL = [
-    (0x10, b'\x00'),
-    (0x75, b'\x00'),
-    (0x11, b'd'),
-    (0x12, b'\x1e\x00\x00\x00'),
-    (0x6D, b'\x01'),
-    (0x55, b'\x00'),
-    (0x54, b'\x00'),
-    (0x20, b'd\x00\x00\x00'),
-]
-
-
-POCKEL_CELL_DRIVER_OUT0_X1_OUT2_X2___2_CHANNEL = [
-    (0x10, b'\x00'),
-    (0x75, b'\x00'),
-    (0x11, b'd'),
-    (0x12, b'\x1e\x00\x00\x00'),
-    (0x6D, b'\x01'),
-    (0x55, b'\x00'),
-    (0x54, b'\x00'),
-    (0x20, b'd\x00\x00\x00'),
-]
-
-
-POCKEL_CELL_DRIVER_OUT0_X1_OUT2_X2_OUT3_X3_OUT4_X4___4_CHANNEL = [
-    (0x10, b'\x00'),
-    (0x75, b'\x00'),
-    (0x11, b'd'),
-    (0x12, b'\x1e\x00\x00\x00'),
-    (0x6D, b'\x01'),
-    (0x55, b'\x00'),
-    (0x54, b'\x00'),
-    (0x20, b'd\x00\x00\x00'),
+test1 = [
+    (0x10, bytes([0x00])),
+    (0x75, bytes([0x00])),
+    (0x11, bytes([0x64])),
+    (0x12, (30).to_bytes(4, "little")),
+    (0x6D, bytes([0x01])),
+    (0x20, (200).to_bytes(4, "little")),
+    (0x55, bytes([0x00])),
+    (0x54, bytes([0x00])),
+    (0x80, (11).to_bytes(4, "little")),
+    (0x5D, bytes([0x0E])),
+    (0x56, bytes([0x01])),
+    (0x16, (26).to_bytes(4, "little")),
+    (0x5E, bytes([0x0B])),
+    (0x57, bytes([0x00])),
+    (0x19, (50).to_bytes(4, "little")),
+    (0x5F, bytes([0x14])),
+    (0x58, bytes([0x00])),
+    (0x1A, (99).to_bytes(4, "little")),
+    (0x60, bytes([0x19])),
+    (0x59, bytes([0x00])),
+    (0x1B, (25).to_bytes(4, "little")),
+    (0x5A, bytes([0x00])),
+    (0x1C, (38).to_bytes(4, "little")),
+    (0x62, bytes([0x0D])),
+    (0x5B, bytes([0x0D])),
+    (0x1D, (56).to_bytes(4, "little")),
+    (0x63, bytes([0x16])),
+    (0x5C, bytes([0x0D])),
+    (0x1E, (61).to_bytes(4, "little")),
+    (0x2E, bytes([0x03])),
+    (0x30, bytes([0x04])),
+    (0x2F, bytes([0x03])),
+    (0x31, bytes([0x04])),
+    (0x36, bytes([0x03])),
+    (0x38, bytes([0x04])),
+    (0x37, bytes([0x05])),
+    (0x39, bytes([0x06])),
+    (0x7A, bytes([0x00])),
 ]

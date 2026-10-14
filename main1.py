@@ -2249,11 +2249,32 @@ class SavePresetsDialog(QDialog):
         buttons.addStretch()
 
         save_button = QPushButton("Save")
+        save_button.setObjectName("SmallBtn")
         save_button.setMinimumSize(110, 42)
         save_button.clicked.connect(self.save_preset)
         buttons.addWidget(save_button)
 
+        close_button = QPushButton("Close")
+        close_button.setObjectName("SmallBtn")
+        close_button.setMinimumSize(110, 42)
+        close_button.clicked.connect(self.reject)
+        buttons.addWidget(close_button)
+
         root.addLayout(buttons)
+        
+    
+    @staticmethod
+    def _format_preset_payload(data: bytes) -> str:
+        """Format register payloads like PRESET1_CHANNEL_SEQUENCE."""
+        if len(data) == 1:
+            return f"bytes([0x{data[0]:02X}])"
+
+        if len(data) in (2, 4):
+            value = int.from_bytes(data, "little")
+            return f'({value}).to_bytes({len(data)}, "little")'
+
+        return f"bytes.fromhex('{data.hex()}')"
+
 
     def save_preset(self):
         import keyword
@@ -2367,13 +2388,18 @@ class SavePresetsDialog(QDialog):
                 )
                 return
 
+            
             with open(preset_path, "a", encoding="utf-8") as file:
                 file.write(f"\n\n{name} = [\n")
 
                 for reg, data in sequence:
-                    file.write(f"    (0x{reg:02X}, {data!r}),\n")
+                    payload = self._format_preset_payload(data)
+                    file.write(
+                        f"    (0x{reg:02X}, {payload}),\n"
+                    )
 
                 file.write("]\n")
+
 
             QMessageBox.information(
                 self, "Save Presets",
@@ -2435,16 +2461,25 @@ class LoadPresetsDialog(QDialog):
         buttons = QHBoxLayout()
 
         self.delete_button = QPushButton("Delete")
+        self.delete_button.setObjectName("SmallBtn")
         self.delete_button.setMinimumSize(115, 42)
 
         buttons.addWidget(self.delete_button)
         buttons.addStretch()
 
         self.load_button = QPushButton("Load")
+        self.load_button.setObjectName("SmallBtn")
         self.load_button.setMinimumSize(115, 42)
         self.load_button.setDefault(True)
 
         buttons.addWidget(self.load_button)
+        
+        close_button = QPushButton("Close")
+        close_button.setObjectName("SmallBtn")
+        close_button.setMinimumSize(110, 42)
+        close_button.clicked.connect(self.reject)
+        buttons.addWidget(close_button)
+        
         root.addLayout(buttons)
 
         self.delete_button.clicked.connect(self.delete_selected)
@@ -2908,37 +2943,6 @@ class TG10Window(QMainWindow):
             ):
                 self._refresh_monitor_hardware()
 
-            
-    def get_system_clock_hz(self):
-        """
-        Return the TG10 system clock used for
-        Frequency/Period RateDiv and delay calculations.
-        """
-
-        mode = self.sync_mode
-
-        if mode == "Internal":
-            return 3_000_000_000.0
-
-        elif mode == "External SINGLE IN":
-            source = self._single_source_name()
-
-            if source == "CLK IN":
-                return 3_000_000_000.0
-
-            elif source == "SYNC IN":
-                raise ValueError(
-                    "External SINGLE IN -> SYNC IN system-clock "
-                    "calculation is not defined yet."
-                )
-
-        elif mode == "External DUAL IN":
-            return 3_000_000_000.0
-
-        elif mode == "One shot trigger":
-            return 3_000_000_000.0
-
-        return 3_000_000_000.0
 
     # ========================================================
     # HEADER
@@ -4196,35 +4200,43 @@ class TG10Window(QMainWindow):
     
     def get_system_clock_hz(self):
         """
-        Return the system clock used for RateDiv/delay calculations.
+        Return the TG10 system/PLL clock frequency in Hz.
         """
+
         mode = self.sync_mode
+        calc = self.calculations
 
         if mode == "Internal":
-            return 3_000_000_000.0
+            return calc.clock_internal_100mhz().f_hz
 
         elif mode == "External SINGLE IN":
             source = self._single_source_name()
 
             if source == "CLK IN":
-                return 3_000_000_000.0
+                fext_hz = self._sync_value_to_hz(
+                    self.external_rate.value(),
+                    self.single_rate_unit.currentText()
+                )
+
+                cfg = calc.clock_external(fext_hz)
+                return cfg.f_hz
 
             elif source == "SYNC IN":
                 raise ValueError(
-                    "External SINGLE IN -> SYNC IN system-clock "
-                    "calculation is not defined yet."
+                    "External SINGLE IN -> SYNC IN uses the "
+                    "external sync-trigger path; its system-clock "
+                    "configuration must be determined separately."
                 )
 
         elif mode == "External DUAL IN":
-            return 3_000_000_000.0
+            # Retain existing behavior until the PLL clock source
+            # for this mode is confirmed.
+            return calc.clock_internal_100mhz().f_hz
 
-        elif mode == "One-shot":
-            return 3_000_000_000.0
+        elif mode in ("One shot trigger", "One-shot"):
+            return calc.clock_internal_100mhz().f_hz
 
-        elif mode == "Smart":
-            return 3_000_000_000.0
-
-        return 3_000_000_000.0
+        raise ValueError(f"Unsupported sync mode: {mode}")
     
     def _set_frequency_hz(self, hz):
         hz=max(0.01,min(20e6,float(hz)))
