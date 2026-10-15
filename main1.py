@@ -7074,7 +7074,7 @@ class TG10Window(QMainWindow):
         self.status_progress.hide()
 
         # h.addWidget(self.status_progress)
-        h.addStretch(1)
+        h.addStretch(10)
         h.addWidget(self.status_progress, 0, Qt.AlignmentFlag.AlignCenter)
         h.addStretch(1)
         h.addWidget(label("TG10 GUI v1.0", "StatusRight"))        
