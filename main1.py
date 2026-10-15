@@ -3934,7 +3934,7 @@ class TG10Window(QMainWindow):
         if mode == "Internal":
 
             sequence = operations.build_internal_100mhz_from_period(
-                period_s=1.0 / 100_000_000.0,
+                period_s=self._get_sync_output_period_s(),
                 command_on=False
             )
 
