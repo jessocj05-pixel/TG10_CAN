@@ -1889,6 +1889,10 @@ class DelayDialog(QDialog):
             return
 
         parent = self.parent_window
+            # Show loading bar in the main TG10 window
+        parent.start_action_progress("Writing delay presets...")
+
+        success = False
 
         try:
 
@@ -1990,7 +1994,7 @@ class DelayDialog(QDialog):
                 field.blockSignals(True)
                 field.setValue(actual_value)
                 field.blockSignals(False)
-
+            success = True
             QMessageBox.information(
                 self,
                 "Delay Presets",
@@ -2004,6 +2008,18 @@ class DelayDialog(QDialog):
                 "Delay Error",
                 f"Failed to apply delay presets:\n\n{e}"
             )
+        finally:
+
+            # Always hide the loading bar
+            if success:
+                parent.finish_action_progress(
+                    "Delay presets written successfully"
+                )
+            else:
+                parent.finish_action_progress(
+                    "Delay preset operation failed"
+                )
+
         
     # ========================================================
     # APPLY POST-DELAY PRESETS
@@ -2017,6 +2033,8 @@ class DelayDialog(QDialog):
         #     return
         
         parent = self.parent_window
+        parent.start_action_progress("Writing post-delay presets...")
+        success = False
 
         if parent is None:
             QMessageBox.warning(
@@ -2109,6 +2127,8 @@ class DelayDialog(QDialog):
                 )
 
                 field.blockSignals(False)
+                success = True
+
 
             except Exception as e:
 
@@ -2117,17 +2137,30 @@ class DelayDialog(QDialog):
                     "Post-delay Error",
                     f"Failed to set post DEL{ch}:\n\n{e}"
                 )
+            finally:
 
-                return
-
-        # ----------------------------------------------------
-        # Success
-        # ----------------------------------------------------
+                # Hide the loading bar on success or failure
+                if success:
+                    parent.finish_action_progress(
+                        "Post-delay presets written successfully"
+                    )
+                else:
+                    parent.finish_action_progress(
+                        "Post-delay preset operation failed"
+                    )
         QMessageBox.information(
             self,
             "Post-delay",
             "Post-delay presets applied successfully."
         )
+
+        return
+            
+
+        # ----------------------------------------------------
+        # Success
+        # ----------------------------------------------------
+
     
 # ============================================================
 # PRESET DIALOG
