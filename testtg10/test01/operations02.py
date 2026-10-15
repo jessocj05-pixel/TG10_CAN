@@ -135,7 +135,7 @@ def seq_external_syncin(
     vco: int = 1,
     ratediv: int = 2,
     *,
-    command_on: bool = True,
+    command_on: bool = False,
 ) -> Sequence:
     """
     External SYNCIN path.
