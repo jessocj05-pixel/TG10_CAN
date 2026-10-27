@@ -10,7 +10,7 @@ SolidCompression=yes
 
 [Files]
 Source: "dist\TG10_Control.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "drivers\CH341SER.EXE"; DestDir: "{tmp}"; Flags: deleteafterinstall
+Source: "driver\CH341SER.EXE"; DestDir: "{tmp}"; Flags: deleteafterinstall
 
 [Icons]
 Name: "{group}\TG10 Control"; Filename: "{app}\TG10_Control.exe"
