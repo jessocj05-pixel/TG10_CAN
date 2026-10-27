@@ -1,0 +1,1174 @@
+"""
+HV PULSE STUDIO  -  TG10 -> DPB1-1000-3.0-Al driver -> BBO Pockels cell
+
+Plain-language planner for the two driver inputs:
+    X1 only      (jumper #7 pos.1): X1 rising = HV ON, X1 falling = HV OFF
+    X1 + X2      (jumper #7 pos.2): X1 rising = HV ON, X2 rising = HV OFF
+
+Put this file next to main1.py (same folder as TG10_CAN_DIR). Open with:
+    from pulse_studio import PulseStudioDialog
+    PulseStudioDialog(self).show()          # self = TG10Window
+
+Standalone test (no hardware):  python pulse_studio.py
+"""
+import math
+import sys
+
+from PySide6.QtCore import Qt, QPointF, QRectF, Signal, QTimer
+from PySide6.QtGui import QPainter, QPen, QColor, QFont, QPainterPath, QFontMetrics
+from PySide6.QtWidgets import (
+    QApplication, QDialog, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QGroupBox,
+    QLabel, QPushButton, QComboBox, QDoubleSpinBox, QSpinBox, QRadioButton, QButtonGroup,
+    QScrollArea, QMessageBox, QCheckBox,
+)
+
+# ------------------------------------------------------------------
+# Hardware facts
+# ------------------------------------------------------------------
+DRV = dict(name="DPB1-1000-3.0-Al", fmax_khz=1000.0, vout_kv=3.0, rail_kv=1.5,
+           tr=7.5, tf=7.5, delay=30.0, pmax=120.0, min_w=100.0, max_w=5000.0, min_trig=20.0)
+USABLE = [0, 2, 3, 4, 5]          # OUT connectors on the panel (manual Fig 2.3)
+INTERNAL = [1, 6, 7]              # internal only - cannot drive the driver
+BASE_STEP_NS = [0.025, 0.025, 0.025, 0.025, 0.025, 9.4, 9.4, 9.4]   # at 3 GHz system clock
+CABLE_NS_PER_M = 5.0
+LANE_COL = ["#3ddc84", "#ffb454", "#5ad9ff", "#ff7fd1", "#b79bff", "#ff9a5a", "#4fe3d0", "#d6e04f"]
+BG = QColor(5, 10, 6)
+GRID = QColor(18, 48, 22)
+GRID2 = QColor(29, 74, 34)
+DIM = QColor(124, 156, 130)
+SEV_COL = {"ok": "#119447", "warn": "#d98200", "err": "#d83b3b", "info": "#5a7085"}
+SEV_ICON = {"ok": "✔", "warn": "⚠", "err": "✖", "info": "ℹ"}
+CFG_MODES = ["Normal (always fire)", "GATE", "nGATE", "Burst", "Frequency divider"]
+
+
+def fmt_ns(v):
+    a = abs(v)
+    if a >= 1e9:
+        return f"{v/1e9:.3f} s"
+    if a >= 1e6:
+        return f"{v/1e6:.3f} ms"
+    if a >= 1e3:
+        return f"{v/1e3:.3f} µs"
+    if a >= 1:
+        return f"{v:.3f} ns"
+    return f"{v*1e3:.1f} ps"
+
+
+def fmt_hz(hz):
+    if not math.isfinite(hz):
+        return "—"
+    if hz >= 1e6:
+        return f"{hz/1e6:.4f} MHz"
+    if hz >= 1e3:
+        return f"{hz/1e3:.4f} kHz"
+    return f"{hz:.3f} Hz"
+
+
+def nice_step(span):
+    raw = span / 10.0
+    if raw <= 0:
+        return 1.0
+    mag = 10 ** math.floor(math.log10(raw))
+    n = raw / mag
+    return (1 if n < 1.5 else 2 if n < 3.5 else 5 if n < 7.5 else 10) * mag
+
+
+# ------------------------------------------------------------------
+# Oscilloscope-style view
+# ------------------------------------------------------------------
+class Scope(QWidget):
+    moved = Signal()
+
+    def __init__(self, dlg):
+        super().__init__()
+        self.d = dlg
+        self.setMinimumHeight(420)
+        self.setMouseTracking(True)
+        self.setCursor(Qt.CrossCursor)
+        self._drag = None
+
+    def _win(self):
+        span = self.d.ns_per_div * 10
+        return self.d.center - span / 2, self.d.center + span / 2
+
+    def ns_of(self, x):
+        a, b = self._win()
+        return a + x / max(self.width(), 1) * (b - a)
+
+    def px_of(self, t):
+        a, b = self._win()
+        return (t - a) / (b - a) * self.width()
+
+    def mousePressEvent(self, ev):
+        mx = ev.position().x()
+        if abs(mx - self.px_of(self.d.cur1)) < 8:
+            self._drag = ("c1",)
+        elif abs(mx - self.px_of(self.d.cur2)) < 8:
+            self._drag = ("c2",)
+        else:
+            self._drag = ("pan", mx, self.d.center)
+
+    def mouseMoveEvent(self, ev):
+        if not self._drag:
+            return
+        x = ev.position().x()
+        if self._drag[0] == "pan":
+            self.d.center = self._drag[2] - (x - self._drag[1]) / self.width() * self.d.ns_per_div * 10
+        elif self._drag[0] == "c1":
+            self.d.cur1 = self.ns_of(x)
+        else:
+            self.d.cur2 = self.ns_of(x)
+        self.moved.emit()
+        self.update()
+
+    def mouseReleaseEvent(self, ev):
+        self._drag = None
+
+    def wheelEvent(self, ev):
+        a, b = self._win()
+        span = b - a
+        pivot = self.ns_of(ev.position().x())
+        f = 1.15 if ev.angleDelta().y() < 0 else 1 / 1.15
+        ns = min(1e10, max(0.5, span * f))
+        start = pivot - (pivot - a) * (ns / span)
+        self.d.center = start + ns / 2
+        self.d.ns_per_div = ns / 10
+        self.moved.emit()
+        self.update()
+
+    def paintEvent(self, _):
+        d = self.d
+        p = QPainter(self)
+        W, H = self.width(), self.height()
+        p.fillRect(0, 0, W, H, BG)
+        a, b = self._win()
+        span = b - a
+        px = lambda t: (t - a) / span * W
+        sf = QFont("Consolas", 8)
+        p.setFont(sf)
+        fm = QFontMetrics(sf)
+        step = nice_step(span)
+        t = math.ceil(a / step) * step
+        while t <= b:
+            strong = round(t / step) % 5 == 0
+            p.setPen(QPen(GRID2 if strong else GRID, 1))
+            p.drawLine(QPointF(px(t), 14), QPointF(px(t), H - 24))
+            lab = fmt_ns(t)
+            p.setPen(DIM)
+            p.drawText(QPointF(min(max(px(t) - fm.horizontalAdvance(lab) / 2, 2), W - fm.horizontalAdvance(lab) - 2), H - 8), lab)
+            t += step
+
+        lanes = d.lanes()
+        top0, avail = 24, H - 24 - 28
+        lh = min(70.0, avail / max(len(lanes), 1))
+        P = d.period
+        for k, ln in enumerate(lanes):
+            y0 = top0 + k * lh
+            hi, lo = y0 + lh * 0.18, y0 + lh * 0.82
+            col = QColor(ln["col"])
+            p.setFont(QFont("Segoe UI", 8, QFont.Bold))
+            p.setPen(col)
+            p.drawText(QPointF(6, y0 + 11), ln["label"])
+            kind = ln["kind"]
+            klo = max(0, math.floor((a - ln.get("tail", 0.0)) / P) - 1)
+            khi = max(0, math.ceil(b / P) + 1)
+            if khi - klo > 1500:
+                c2 = QColor(col)
+                c2.setAlpha(60)
+                p.fillRect(QRectF(0, hi, W, lo - hi), c2)
+                p.setPen(col)
+                p.drawText(QPointF(150, y0 + 11), f"{fmt_hz(1e9/P)} repetition - zoom in")
+                continue
+            if kind == "trig":
+                for kk in range(klo, khi + 1):
+                    if a <= kk * P <= b:
+                        p.setPen(QPen(QColor(255, 255, 255, 150), 1.4))
+                        p.drawLine(QPointF(px(kk * P), lo), QPointF(px(kk * P), hi))
+            elif kind == "cfg":
+                for kk in range(klo, khi + 1):
+                    x1, x2 = px(kk * P), px((kk + 1) * P)
+                    on = d.cfg2(kk)
+                    c3 = QColor(60, 200, 110, 90) if on else QColor(120, 120, 120, 60)
+                    p.fillRect(QRectF(x1 + 1, hi, max(x2 - x1 - 2, 1), lo - hi), c3)
+                    if x2 - x1 > 50:
+                        p.setPen(QColor(220, 235, 220))
+                        p.drawText(QPointF(x1 + 6, lo - 4), "Config 2 FIRE" if on else "Config 1 idle")
+            elif kind == "gate":
+                y = hi if ln["level"] else lo
+                p.setPen(QPen(col, 2))
+                p.drawLine(QPointF(0, y), QPointF(W, y))
+            elif kind == "dig":
+                r, f = ln["edge"]
+                cnt, gp = ln.get("train", (1, 0.0))
+                path = QPainterPath()
+                path.moveTo(0, lo)
+                for kk in range(klo, khi + 1):
+                    if not d.cfg2(kk):
+                        continue
+                    for j in range(cnt):
+                        x1, x2 = px(r + kk * P + j * gp), px(f + kk * P + j * gp)
+                        path.lineTo(x1, lo)
+                        path.lineTo(x1, hi)
+                        path.lineTo(x2, hi)
+                        path.lineTo(x2, lo)
+                path.lineTo(W, lo)
+                p.setPen(QPen(col, 2.0 if ln.get("sel") else 1.5))
+                p.drawPath(path)
+                if ln.get("sel"):
+                    for kk in range(klo, khi + 1):
+                        if d.cfg2(kk):
+                            x1, x2 = px(r + kk * P), px(f + kk * P)
+                            if x2 - x1 > 40 and 0 < x1 < W:
+                                p.setPen(QPen(QColor(255, 207, 138), 1))
+                                p.drawLine(QPointF(x1, lo + 2), QPointF(x2, lo + 2))
+                                p.setFont(sf)
+                                p.drawText(QPointF(x1 + 3, lo + 11), f"w={fmt_ns(f - r)}")
+                            break
+            elif kind == "hv":
+                n = max(300, W)
+                mid, half = (hi + lo) / 2, (lo - hi) / 2
+                pp, pn = QPainterPath(), QPainterPath()
+                for i in range(n + 1):
+                    tt = a + span * i / n
+                    lvl = min(max(d.hv_at(ln["cell"], tt) / ln["vmax"], 0), 1.05)
+                    (pp.lineTo if i else pp.moveTo)(i / n * W, mid - lvl * half)
+                    (pn.lineTo if i else pn.moveTo)(i / n * W, mid + lvl * half)
+                p.setPen(QPen(QColor(150, 150, 150, 90), 1))
+                p.drawLine(QPointF(0, mid), QPointF(W, mid))
+                p.setPen(QPen(QColor(255, 110, 110), 2.0))
+                p.drawPath(pp)
+                p.setPen(QPen(QColor(110, 150, 255), 2.0))
+                p.drawPath(pn)
+            elif kind == "opt":
+                n = max(300, W)
+                path = QPainterPath()
+                for i in range(n + 1):
+                    tt = a + span * i / n
+                    lvl = d.transmission(d.hv_at(ln["cell"], tt))
+                    (path.lineTo if i else path.moveTo)(i / n * W, lo - min(max(lvl, 0), 1.05) * (lo - hi))
+                p.setPen(QPen(col, 2.0))
+                p.drawPath(path)
+        for cur, colr, lab in ((d.cur1, QColor(90, 217, 255), "X1"), (d.cur2, QColor(255, 90, 208), "X2")):
+            x = px(cur)
+            tri = QPainterPath()
+            tri.moveTo(x - 8, 2)
+            tri.lineTo(x + 8, 2)
+            tri.lineTo(x, 16)
+            tri.closeSubpath()
+            p.fillPath(tri, colr)
+            p.setPen(QPen(colr, 1.5, Qt.DashLine))
+            p.drawLine(QPointF(x, 16), QPointF(x, H - 24))
+            p.setPen(QColor(8, 17, 10))
+            p.setFont(QFont("Consolas", 8, QFont.Bold))
+            p.drawText(QPointF(x - 6, 12), lab)
+        p.end()
+
+
+# ------------------------------------------------------------------
+# Main dialog
+# ------------------------------------------------------------------
+class PulseStudioDialog(QDialog):
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.pw = parent
+        self.setWindowTitle("HV Pulse Studio — TG10 → DPB1-1000-3.0-Al → BBO Pockels cell")
+        self.resize(1380, 880)
+        self.setWindowFlag(Qt.WindowMaximizeButtonHint, True)
+
+        self.period = 1000.0
+        self.center, self.ns_per_div = 500.0, 100.0
+        self.cur1, self.cur2 = 30.0, 230.0
+        self.sel = 0
+        self.mode = 1                      # 1 = X1 only, 2 = X1+X2
+        self._busy = True
+        self._sig = None
+        self.cells = []
+        for i in range(5):
+            self.cells.append(dict(a=USABLE[i], b=USABLE[(i + 1) % 5], rise=100.0 + 50 * i,
+                                   width=500.0, rise2=600.0 + 50 * i, trig=50.0))
+
+        root = QHBoxLayout(self)
+        sc = QScrollArea()
+        sc.setWidgetResizable(True)
+        sc.setFixedWidth(450)
+        sc.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        holder = QWidget()
+        self.left = QVBoxLayout(holder)
+        sc.setWidget(holder)
+        root.addWidget(sc)
+        right = QVBoxLayout()
+        root.addLayout(right, 1)
+        self._build_left()
+        self._build_right(right)
+
+        self._busy = False
+        self._mode_changed()
+        self.load_config_from_main()
+        self.load_from_main(silent=True)
+        self.autoset()
+        self._poll = QTimer(self)
+        self._poll.timeout.connect(self._poll_main)
+        self._poll.start(700)
+
+    # ---------------- small UI helpers ----------------
+    def _spin(self, lo, hi, val, dec, suf, slot=None):
+        s = QDoubleSpinBox()
+        s.setRange(lo, hi)
+        s.setDecimals(dec)
+        s.setValue(val)
+        s.setSuffix(suf)
+        s.setMinimumHeight(28)
+        s.valueChanged.connect(slot or self.refresh)
+        return s
+
+    def _group(self, title, rows):
+        g = QGroupBox(title)
+        l = QGridLayout(g)
+        for i, (n, w) in enumerate(rows):
+            if n is None:
+                l.addWidget(w, i, 0, 1, 2)
+            else:
+                lab = QLabel(n)
+                lab.setWordWrap(True)
+                l.addWidget(lab, i, 0)
+                l.addWidget(w, i, 1)
+        self.left.addWidget(g)
+        return g
+
+    def _outcombo(self, slot):
+        c = QComboBox()
+        for o in USABLE:
+            c.addItem(f"OUT{o}", o)
+        c.currentIndexChanged.connect(slot)
+        return c
+
+    # ---------------- left panel ----------------
+    def _build_left(self):
+        # 1. mode
+        g = QGroupBox("1 · How is the Pockels driver triggered?")
+        gl = QVBoxLayout(g)
+        self.r1 = QRadioButton("ONE pulse (X1 only)\nX1 goes HIGH = HV ON, X1 goes LOW = HV OFF")
+        self.r2 = QRadioButton("TWO pulses (X1 + X2)\nX1 rising edge = HV ON, X2 rising edge = HV OFF")
+        self.r1.setChecked(True)
+        grp = QButtonGroup(g)
+        for r in (self.r1, self.r2):
+            grp.addButton(r)
+            gl.addWidget(r)
+            r.toggled.connect(self._mode_changed)
+        self.left.addWidget(g)
+        note = QLabel("Match the jumper #7 on the DPB1 driver: position 1 = ONE pulse, position 2 = TWO pulses.")
+        note.setWordWrap(True)
+        note.setStyleSheet("color:#5a7085;")
+        self.left.addWidget(note)
+
+        # 2. cells + channels
+        self.sp_n = QSpinBox()
+        self.sp_n.setRange(1, 5)
+        self.sp_n.setMinimumHeight(28)
+        self.sp_n.valueChanged.connect(self._count_changed)
+        self.cb_cell = QComboBox()
+        self.cb_cell.currentIndexChanged.connect(self._cell_selected)
+        self.cb_a = self._outcombo(self._chan_changed)
+        self.cb_b = self._outcombo(self._chan_changed)
+        self.lab_b = QLabel("X2 (SYNC IN2) comes from")
+        self._group("2 · Pockels cells and TG10 channels", [
+            ("Number of Pockels cells / drivers", self.sp_n), ("Edit cell", self.cb_cell),
+            ("X1 (SYNC IN1) comes from", self.cb_a)])
+        grid = self.left.itemAt(self.left.count() - 1).widget().layout()
+        grid.addWidget(self.lab_b, 3, 0)
+        grid.addWidget(self.cb_b, 3, 1)
+        info = QLabel("OUT0, OUT2, OUT3, OUT4, OUT5 have connectors on the TG10. OUT1, OUT6, OUT7 are internal only "
+                      "and are not offered.")
+        info.setWordWrap(True)
+        info.setStyleSheet("color:#5a7085;")
+        self.left.addWidget(info)
+
+        # 3. pulse timing
+        self.sp_rise = self._spin(0.025, 150e6, 100, 3, " ns", self._timing_edited)
+        self.sp_width = self._spin(4, 150e6, 500, 3, " ns", self._timing_edited)
+        self.sp_rise2 = self._spin(0.025, 150e6, 600, 3, " ns", self._timing_edited)
+        self.sp_dur = self._spin(0.0, 150e6, 500, 3, " ns", self._dur_edited)
+        self.sp_trig = self._spin(4, 1e6, 50, 3, " ns", self._timing_edited)
+        self.lab_rise = QLabel("HV ON  =  X1 rise delay (DEL after trigger)")
+        self.lab_width = QLabel("HV pulse width  =  X1 pulse width")
+        self.lab_rise2 = QLabel("HV OFF  =  X2 rise delay")
+        self.lab_dur = QLabel("HV ON time  (X2 − X1 difference)")
+        self.lab_trig = QLabel("X1 / X2 trigger pulse width")
+        g3 = QGroupBox("3 · Pulse timing of the selected cell")
+        l3 = QGridLayout(g3)
+        self.rows3 = []
+        for i, (lab, sp) in enumerate([(self.lab_rise, self.sp_rise), (self.lab_width, self.sp_width),
+                                       (self.lab_rise2, self.sp_rise2), (self.lab_dur, self.sp_dur),
+                                       (self.lab_trig, self.sp_trig)]):
+            lab.setWordWrap(True)
+            l3.addWidget(lab, i, 0)
+            l3.addWidget(sp, i, 1)
+            self.rows3.append((lab, sp))
+        self.lab_read = QLabel("")
+        self.lab_read.setTextFormat(Qt.RichText)
+        self.lab_read.setWordWrap(True)
+        self.ck_regen = QCheckBox("Pulse regeneration (HV longer than 5 µs, X1+X2 only)")
+        self.ck_regen.toggled.connect(self.refresh)
+        self.sp_gap = self._spin(100, 5000, 4000, 1, " ns")
+        self.lab_gap = QLabel("X1 repeat interval (≤ 5000 ns)")
+        self.lab_gap.setWordWrap(True)
+        l3.addWidget(self.ck_regen, 5, 0, 1, 2)
+        l3.addWidget(self.lab_gap, 6, 0)
+        l3.addWidget(self.sp_gap, 6, 1)
+        self.lab_read.setMinimumHeight(130)
+        self.lab_read.setAlignment(Qt.AlignTop)
+        l3.addWidget(self.lab_read, 7, 0, 1, 2)
+        self.left.addWidget(g3)
+
+        # 4. config / gate
+        self.cb_cfg = QComboBox()
+        self.cb_cfg.addItems(CFG_MODES)
+        self.cb_cfg.currentIndexChanged.connect(self._cfg_changed)
+        self.cb_level = QComboBox()
+        self.cb_level.addItems(["GATE IN is HIGH", "GATE IN is LOW"])
+        self.cb_level.currentIndexChanged.connect(self.refresh)
+        self.sp_cnt = QSpinBox()
+        self.sp_cnt.setRange(1, 65535)
+        self.sp_cnt.setValue(3)
+        self.sp_cnt.setMinimumHeight(28)
+        self.sp_cnt.valueChanged.connect(self.refresh)
+        self.lab_cnt = QLabel("Burst count")
+        self._group("4 · Config 1 / Config 2  and  GATE (optional)", [
+            ("Config control (mirrors main window)", self.cb_cfg), ("GATE input level (simulation)", self.cb_level),
+            (None, self.lab_cnt), ("Count", self.sp_cnt)])
+        cnote = QLabel("Config 1 = idle (output stays LOW, no HV pulse). Config 2 = fire (pulse is generated).")
+        cnote.setWordWrap(True)
+        cnote.setStyleSheet("color:#5a7085;")
+        self.left.addWidget(cnote)
+
+        # 5. system
+        self.sp_per = self._spin(1, 1e12, 1000, 3, " ns")
+        self.cb_umax = QComboBox()
+        self.cb_umax.addItems(["±1.4 kV", "±2.5 kV"])
+        self.cb_umax.currentIndexChanged.connect(self.refresh)
+        self.sp_rail = self._spin(0.05, 6, 1.4, 3, " kV")
+        self.sp_vfull = self._spin(0.05, 20, 3.0, 3, " kV")
+        self.sp_cap = self._spin(0.5, 50, 6.0, 2, " pF")
+        self.sp_ddel = self._spin(0, 500, DRV["delay"], 2, " ns")
+        self.sp_c1 = self._spin(0, 100, 1.0, 2, " m")
+        self.sp_c2 = self._spin(0, 100, 1.0, 2, " m")
+        self._group("5 · Repetition, HV supply and BBO cell", [
+            ("Output period (TG10 repetition)", self.sp_per),
+            ("HVS100-2X60 max voltage option (Umax)", self.cb_umax),
+            ("HVS-100 rail setpoint (each of +HV / −HV)", self.sp_rail),
+            ("BBO full-open voltage (datasheet)", self.sp_vfull),
+            ("Cell + wiring capacitance", self.sp_cap),
+            ("Driver delay X-edge → HV edge (measure or datasheet)", self.sp_ddel),
+            ("X1 cable length", self.sp_c1), ("X2 cable length", self.sp_c2)])
+        self.left.addStretch(1)
+
+    # ---------------- right panel ----------------
+    def _build_right(self, right):
+        self.lab_banner = QLabel("")
+        self.lab_banner.setTextFormat(Qt.RichText)
+        self.lab_banner.setStyleSheet("padding:6px; border-radius:4px; background:#f4f8fb; border:1px solid #c5d4e2;")
+        right.addWidget(self.lab_banner)
+        tb = QHBoxLayout()
+        self.sp_div = QDoubleSpinBox()
+        self.sp_div.setRange(0.05, 1e10)
+        self.sp_div.setDecimals(3)
+        self.sp_div.setSuffix(" ns/div")
+        self.sp_div.setValue(100)
+        self.sp_div.valueChanged.connect(self._view_edit)
+        self.sp_ctr = QDoubleSpinBox()
+        self.sp_ctr.setRange(-1e12, 1e12)
+        self.sp_ctr.setDecimals(3)
+        self.sp_ctr.setSuffix(" ns centre")
+        self.sp_ctr.setValue(500)
+        self.sp_ctr.valueChanged.connect(self._view_edit)
+        tb.addWidget(self.sp_div)
+        tb.addWidget(self.sp_ctr)
+        tb.addStretch(1)
+        for text, fn in (("Auto view", self.autoset), ("Zoom on HV pulse", self.zoom_hv),
+                         ("Cursors → HV ON / OFF", self.cur_hv), ("Cursors → one period", self.cur_period)):
+            b = QPushButton(text)
+            b.clicked.connect(fn)
+            tb.addWidget(b)
+        right.addLayout(tb)
+        self.scope = Scope(self)
+        self.scope.moved.connect(self._scope_moved)
+        right.addWidget(self.scope, 1)
+        self.lab_cur = QLabel("")
+        self.lab_cur.setTextFormat(Qt.RichText)
+        right.addWidget(self.lab_cur)
+        hint = QLabel("Scope: mouse wheel = zoom, drag = move, drag the X1 / X2 triangles to measure any time difference.")
+        hint.setStyleSheet("color:#5a7085;")
+        right.addWidget(hint)
+        self.lab_chk = QLabel("")
+        self.lab_chk.setTextFormat(Qt.RichText)
+        self.lab_chk.setWordWrap(True)
+        self.lab_chk.setAlignment(Qt.AlignTop)
+        self.lab_chk.setStyleSheet("background:#ffffff; border:1px solid #c5d4e2; border-radius:4px; padding:8px;")
+        sa = QScrollArea()
+        sa.setWidgetResizable(True)
+        sa.setWidget(self.lab_chk)
+        sa.setMinimumHeight(190)
+        right.addWidget(sa)
+        self.ck_hv_ready = QCheckBox("Interlock: HVS-100 is ON at the set rail voltage, 24 V is ON, driver load is connected "
+                                     "(check on the HVS-100 OLED). Required before sending to the TG10.")
+        self.ck_hv_ready.setStyleSheet("font-weight:600; color:#b3261e;")
+        self.ck_hv_ready.setToolTip("The GUI cannot read the HVS-100 yet, so you confirm this by hand.")
+        right.addWidget(self.ck_hv_ready)
+        bl = QHBoxLayout()
+        for text, fn in (("Read back from TG10", self.read_from_tg10),
+                         ("Load from Delay presets / main window", lambda: self.load_from_main(False)),
+                         ("Fill Output card (GUI only)", lambda: self.fill_output_card(False)),
+                         ("Send Output conditions", lambda: self.fill_output_card(True)),
+                         ("Send to TG10 (hardware)", self.send_to_tg10)):
+            b = QPushButton(text)
+            b.setMinimumHeight(32)
+            b.clicked.connect(fn)
+            bl.addWidget(b)
+        right.addLayout(bl)
+
+    # ---------------- model ----------------
+    def active_cells(self):
+        return self.cells[:self.sp_n.value()]
+
+    def cur_cell(self):
+        return self.cells[min(self.sel, self.sp_n.value() - 1)]
+
+    def fsys(self, ch):
+        try:
+            return float(self.pw.system_clock_hz(ch))
+        except Exception:
+            return 3e9
+
+    def step(self, ch):
+        return BASE_STEP_NS[ch] * 3e9 / self.fsys(ch)
+
+    def snap(self, v, ch):
+        s = self.step(ch)
+        return round(v / s) * s
+
+    def real_w(self, ch, w):
+        tick = 1e9 / self.fsys(ch)
+        return max(4.0, round(w / tick) * tick)
+
+    @property
+    def cab1(self):
+        return self.sp_c1.value() * CABLE_NS_PER_M
+
+    @property
+    def cab2(self):
+        return self.sp_c2.value() * CABLE_NS_PER_M
+
+    def edges(self, c):
+        """Realized TG10 edges: (r1, f1, r2, f2). r2/f2 None in X1-only mode."""
+        r1 = self.snap(c["rise"], c["a"])
+        if self.mode == 1:
+            return r1, r1 + self.real_w(c["a"], c["width"]), None, None
+        f1 = r1 + self.real_w(c["a"], c["trig"])
+        r2 = self.snap(c["rise2"], c["b"])
+        return r1, f1, r2, r2 + self.real_w(c["b"], c["trig"])
+
+    def hv_window(self, c):
+        """(HV ON trigger time, HV OFF trigger time) at the driver inputs."""
+        r1, f1, r2, f2 = self.edges(c)
+        if self.mode == 1:
+            return r1 + self.cab1, f1 + self.cab1
+        return r1 + self.cab1, r2 + self.cab2
+
+    def regen_n(self, c):
+        """Number of X1 pulses. 1 unless pulse regeneration is on (X2 must follow the last X1 by >100 ns)."""
+        if self.mode != 2 or not self.ck_regen.isChecked():
+            return 1
+        on, off = self.hv_window(c)
+        D = off - on
+        return int((D - DRV["min_w"]) // self.sp_gap.value()) + 1 if D > DRV["min_w"] else 1
+
+    def vcell(self):
+        return min(2 * self.sp_rail.value(), DRV["vout_kv"])
+
+    def tr_tf(self):
+        sc = max(1.0, self.sp_cap.value() / 6.0)
+        return DRV["tr"] * sc, DRV["tf"] * sc
+
+    def cfg2(self, k):
+        """True when period k (0 = first period after trigger) runs Config 2 (fire)."""
+        m = self.cb_cfg.currentIndex()
+        n = self.sp_cnt.value()
+        high = self.cb_level.currentIndex() == 0
+        if m == 0:
+            return True
+        if m == 1:
+            return high
+        if m == 2:
+            return not high
+        if m == 3:
+            return k < n
+        return k % n == 0
+
+    def hv_at(self, c, t):
+        on, off = self.hv_window(c)
+        on, off = on + self.sp_ddel.value(), off + self.sp_ddel.value()
+        dur = off - on
+        if dur <= 0:
+            return 0.0
+        tr, tf = self.tr_tf()
+        V = self.vcell()
+        P = self.period
+        k0 = math.floor((t - on) / P)
+        v = 0.0
+        for k in (k0, k0 - 1):
+            if k < 0 or not self.cfg2(k):
+                continue
+            x = t - (on + k * P)
+            if x < 0:
+                continue
+            if x < tr:
+                v += V * x / tr
+            elif x < dur:
+                v += V
+            elif x < dur + tf:
+                v += V * (1 - (x - dur) / tf)
+        return v
+
+    def transmission(self, v):
+        return math.sin(math.pi / 2 * v / self.sp_vfull.value()) ** 2
+
+    def optical_window(self, c):
+        on, off = self.hv_window(c)
+        on, off = on + self.sp_ddel.value(), off + self.sp_ddel.value()
+        tr, tf = self.tr_tf()
+        V, Vf = self.vcell(), self.sp_vfull.value()
+        if V < Vf / 2 or off <= on:
+            return None, None
+        q = (Vf / 2) / V
+        return on + tr * q, off + tf * (1 - q)
+
+    # ---------------- lanes for the scope ----------------
+    def lanes(self):
+        L = [dict(kind="trig", label="TRIG (T0)", col="#e6e6e6"),
+             dict(kind="cfg", label="CONFIG ACTIVE", col="#9fd8a8")]
+        m = self.cb_cfg.currentIndex()
+        if m in (1, 2):
+            L.append(dict(kind="gate", label="GATE IN", col="#e2c04a", level=self.cb_level.currentIndex() == 0))
+        for i, c in enumerate(self.active_cells()):
+            r1, f1, r2, f2 = self.edges(c)
+            col = LANE_COL[i % len(LANE_COL)]
+            n_x1 = self.regen_n(c)
+            gp = self.sp_gap.value()
+            L.append(dict(kind="dig", label=f"Cell {i+1} · X1 = OUT{c['a']}" + (f" ×{n_x1}" if n_x1 > 1 else ""),
+                          col=col, edge=(r1, f1), sel=(i == self.sel), tail=f1 + (n_x1 - 1) * gp,
+                          train=(n_x1, gp)))
+            if self.mode == 2:
+                L.append(dict(kind="dig", label=f"Cell {i+1} · X2 = OUT{c['b']}", col=col, edge=(r2, f2),
+                              sel=(i == self.sel), tail=f2))
+            tail = self.hv_window(c)[1] + 100
+            L.append(dict(kind="hv", label=f"Cell {i+1} · PCD OUTPUT + (red) / − (blue)", col="#ff7878", cell=c,
+                          vmax=max(self.vcell(), 1e-6) * 1.1, tail=tail))
+            if i == self.sel:
+                L.append(dict(kind="opt", label=f"Cell {i+1} · light passes (0-100 %)", col="#5ad9ff", cell=c, tail=tail))
+        return L
+
+    # ---------------- events ----------------
+    def _mode_changed(self, *_):
+        if self._busy:
+            return
+        self.mode = 1 if self.r1.isChecked() else 2
+        self._busy = True
+        if self.mode == 2:
+            self.sp_n.setMaximum(2)
+            pairs = [(0, 2), (3, 4)]
+            for i, (a, b) in enumerate(pairs):
+                self.cells[i]["a"], self.cells[i]["b"] = a, b
+                self.cells[i]["rise2"] = self.cells[i]["rise"] + max(self.cells[i]["width"], 100.0)
+        else:
+            self.sp_n.setMaximum(5)
+        self._busy = False
+        self._fill_cell_combo()
+        self._load_cell_ui()
+        self.refresh()
+
+    def _count_changed(self, *_):
+        if self._busy:
+            return
+        self._fill_cell_combo()
+        self.refresh()
+
+    def _fill_cell_combo(self):
+        self._busy = True
+        self.cb_cell.clear()
+        for i in range(self.sp_n.value()):
+            self.cb_cell.addItem(f"Pockels cell {i+1}")
+        self.sel = min(self.sel, self.sp_n.value() - 1)
+        self.cb_cell.setCurrentIndex(self.sel)
+        self._busy = False
+
+    def _cell_selected(self, i):
+        if self._busy or i < 0:
+            return
+        self.sel = i
+        self._load_cell_ui()
+        self.refresh()
+
+    def _chan_changed(self, *_):
+        if self._busy:
+            return
+        c = self.cur_cell()
+        c["a"] = self.cb_a.currentData()
+        c["b"] = self.cb_b.currentData()
+        self.refresh()
+
+    def _load_cell_ui(self):
+        c = self.cur_cell()
+        self._busy = True
+        self.cb_a.setCurrentIndex(self.cb_a.findData(c["a"]))
+        self.cb_b.setCurrentIndex(self.cb_b.findData(c["b"]))
+        self.sp_rise.setValue(c["rise"])
+        self.sp_width.setValue(c["width"])
+        self.sp_rise2.setValue(c["rise2"])
+        self.sp_dur.setValue(max(c["rise2"] - c["rise"], 0.0))
+        self.sp_trig.setValue(c["trig"])
+        two = self.mode == 2
+        self.cb_b.setVisible(two)
+        self.lab_b.setVisible(two)
+        for w in (self.lab_width, self.sp_width):
+            w.setVisible(not two)
+        for w in (self.lab_rise2, self.sp_rise2, self.lab_dur, self.sp_dur, self.lab_trig, self.sp_trig,
+                  self.ck_regen, self.lab_gap, self.sp_gap):
+            w.setVisible(two)
+        self._busy = False
+
+    def _timing_edited(self, *_):
+        if self._busy:
+            return
+        c = self.cur_cell()
+        c["rise"], c["width"] = self.sp_rise.value(), self.sp_width.value()
+        c["rise2"], c["trig"] = self.sp_rise2.value(), self.sp_trig.value()
+        self._busy = True
+        self.sp_dur.setValue(max(c["rise2"] - c["rise"], 0.0))
+        self._busy = False
+        self.refresh()
+
+    def _dur_edited(self, *_):
+        if self._busy:
+            return
+        c = self.cur_cell()
+        c["rise"] = self.sp_rise.value()
+        c["rise2"] = c["rise"] + self.sp_dur.value()
+        self._busy = True
+        self.sp_rise2.setValue(c["rise2"])
+        self._busy = False
+        self.refresh()
+
+    def _cfg_changed(self, *_):
+        m = self.cb_cfg.currentIndex()
+        self.lab_cnt.setText({3: "Burst count (pulses per burst)", 4: "Divide by N (1 fire period in N)"}.get(m, "Count (used by Burst / Divider)"))
+        self.sp_cnt.setEnabled(m in (3, 4))
+        self.cb_level.setEnabled(m in (1, 2))
+        self.refresh()
+
+    def _view_edit(self, *_):
+        if self._busy:
+            return
+        self.ns_per_div, self.center = self.sp_div.value(), self.sp_ctr.value()
+        self.scope.update()
+
+    def _scope_moved(self):
+        self._busy = True
+        self.sp_div.setValue(self.ns_per_div)
+        self.sp_ctr.setValue(self.center)
+        self._busy = False
+        self._cursor_text()
+
+    def _set_view(self, c, npd):
+        self.center, self.ns_per_div = c, max(0.05, npd)
+        self._scope_moved()
+        self.scope.update()
+
+    def autoset(self):
+        end = max([self.hv_window(c)[1] + self.sp_ddel.value() + self.tr_tf()[1] * 2 for c in self.active_cells()] + [self.period])
+        span = end * 1.1
+        self._set_view(span / 2 - 0.05 * span, span / 10)
+
+    def zoom_hv(self):
+        on, off = self.hv_window(self.cur_cell())
+        span = max(off - on, 20.0) * 2.2
+        self._set_view((on + off) / 2 + self.sp_ddel.value(), span / 10)
+
+    def cur_hv(self):
+        on, off = self.hv_window(self.cur_cell())
+        self.cur1, self.cur2 = on + self.sp_ddel.value(), off + self.sp_ddel.value()
+        self._cursor_text()
+        self.scope.update()
+
+    def cur_period(self):
+        self.cur1, self.cur2 = 0.0, self.period
+        self._cursor_text()
+        self.scope.update()
+
+    def _cursor_text(self):
+        dx = self.cur2 - self.cur1
+        self.lab_cur.setText(
+            f"<span style='color:#1b9ad1'><b>X1</b> {fmt_ns(self.cur1)}</span> &nbsp; "
+            f"<span style='color:#c2368f'><b>X2</b> {fmt_ns(self.cur2)}</span> &nbsp; "
+            f"<b>ΔX</b> {fmt_ns(dx)} &nbsp; <b>1/ΔX</b> {fmt_hz(abs(1e9/dx)) if dx else '—'}")
+
+    # ---------------- main-window mirroring ----------------
+    def load_config_from_main(self):
+        try:
+            s = self.pw.config_settings["Config 1"]
+        except Exception:
+            return
+        mode = s.get("mode", "Normal")
+        self._busy = True
+        if mode == "Gate":
+            self.cb_cfg.setCurrentIndex(2 if s.get("gate") == "nGATE" else 1)
+        elif mode == "Burst":
+            self.cb_cfg.setCurrentIndex(3)
+            self.sp_cnt.setValue(int(s.get("burst_count", 1)))
+        elif mode == "Frequency divider":
+            self.cb_cfg.setCurrentIndex(4)
+            self.sp_cnt.setValue(int(s.get("divider", 1)))
+        else:
+            self.cb_cfg.setCurrentIndex(0)
+        self._busy = False
+        self._cfg_changed()
+
+    def load_from_main(self, silent=True):
+        pw = self.pw
+        try:
+            dd = getattr(pw, "delay_dialog", None)
+            per = getattr(pw, "current_period_s", None)
+            if per:
+                self.sp_per.setValue(per * 1e9)
+            if dd is None:
+                return
+            u = dd.UNIT_TO_SECONDS
+            self._busy = True
+            for c in self.cells:
+                a, b = c["a"], c["b"]
+                get = lambda f, un, i: f[i].value() * u[un[i].currentText()] * 1e9
+                c["rise"] = get(dd.delay_fields, dd.delay_units, a)
+                c["width"] = max(4.0, get(dd.post_delay_fields, dd.post_delay_units, a))
+                c["rise2"] = get(dd.delay_fields, dd.delay_units, b)
+                c["trig"] = max(4.0, get(dd.post_delay_fields, dd.post_delay_units, a))
+            self._busy = False
+            self._load_cell_ui()
+        except Exception as exc:
+            self._busy = False
+            if not silent:
+                QMessageBox.warning(self, "Load", f"Could not read Delay presets: {exc}")
+        self.refresh()
+
+    def _signature(self):
+        pw = self.pw
+        dd = getattr(pw, "delay_dialog", None)
+        vals = ()
+        if dd is not None:
+            vals = tuple((dd.delay_fields[i].value(), dd.delay_units[i].currentText(),
+                          dd.post_delay_fields[i].value(), dd.post_delay_units[i].currentText()) for i in range(8))
+        cfg = getattr(pw, "config_settings", {}).get("Config 1", {})
+        return (vals, tuple(sorted(cfg.items())), getattr(pw, "current_period_s", None))
+
+    def _poll_main(self):
+        if self.pw is None or not self.isVisible():
+            return
+        try:
+            sig = self._signature()
+        except Exception:
+            return
+        if self._sig is None:
+            self._sig = sig
+        elif sig != self._sig:
+            old, self._sig = self._sig, sig
+            if old[1] != sig[1]:
+                self.load_config_from_main()
+            if old[0] != sig[0] or old[2] != sig[2]:
+                self.load_from_main(silent=True)
+
+    # ---------------- checks ----------------
+    def checks(self):
+        ck = []
+        add = lambda s, t: ck.append((s, t))
+        P = self.period
+        f = 1e9 / P
+        if f / 1e3 > DRV["fmax_khz"]:
+            add("err", f"Repetition {fmt_hz(f)} is above the {DRV['name']} limit of {DRV['fmax_khz']:.0f} kHz.")
+        else:
+            add("ok", f"Repetition {fmt_hz(f)} is within the {DRV['fmax_khz']:.0f} kHz driver limit.")
+        used = []
+        for i, c in enumerate(self.active_cells()):
+            n = f"Cell {i+1}"
+            used.extend(self.chain_channels(c))
+            r1, f1, r2, f2 = self.edges(c)
+            on, off = self.hv_window(c)
+            D = off - on
+            if self.mode == 1:
+                if D < DRV["min_w"]:
+                    add("err", f"{n}: HV pulse {fmt_ns(D)} is shorter than 100 ns - driver may be damaged. Make X1 wider.")
+                elif D > DRV["max_w"]:
+                    add("warn", f"{n}: HV pulse {fmt_ns(D)} is longer than 5000 ns. Use TWO pulses (X1+X2) for long HV.")
+                else:
+                    add("ok", f"{n}: HV pulse {fmt_ns(D)} is inside 100…5000 ns.")
+            else:
+                used.append(c["b"])
+                if c["a"] == c["b"]:
+                    add("err", f"{n}: X1 and X2 use the same output OUT{c['a']}. Pick two different outputs.")
+                if D <= 0:
+                    add("err", f"{n}: X2 comes before X1 - HV would never switch off. Make X2 delay larger than X1 delay.")
+                elif D < DRV["min_w"]:
+                    add("err", f"{n}: X2 − X1 = {fmt_ns(D)} is below 100 ns - driver may be damaged.")
+                elif D > DRV["max_w"] and not self.ck_regen.isChecked():
+                    add("warn", f"{n}: X2 − X1 = {fmt_ns(D)} is above 5000 ns. Tick 'Pulse regeneration'.")
+                elif D > DRV["max_w"]:
+                    add("ok", f"{n}: {fmt_ns(D)} HV ON time is allowed with pulse regeneration.")
+                else:
+                    add("ok", f"{n}: X2 − X1 = {fmt_ns(D)} is inside 100…5000 ns.")
+                for nm, w in (("X1", f1 - r1), ("X2", f2 - r2)):
+                    if w <= DRV["min_trig"]:
+                        add("err", f"{n}: {nm} trigger pulse {fmt_ns(w)} must be longer than 20 ns.")
+                nx = self.regen_n(c)
+                if nx > 1:
+                    gp = self.sp_gap.value()
+                    if f1 - r1 >= gp:
+                        add("err", f"{n}: X1 pulse width {fmt_ns(f1-r1)} is not shorter than the repeat interval {fmt_ns(gp)}.")
+                    add("info", f"{n}: {nx} X1 pulses every {fmt_ns(gp)}, then X2 {fmt_ns(D-(nx-1)*gp)} after the last one (needs >100 ns).")
+                    if nx > 5:
+                        add("err", f"{n}: {nx} X1 pulses needed, but the TG10 OR chain gives at most 5. Increase the repeat interval (≤ 5000 ns).")
+                    elif c["a"] != 5:
+                        add("err", f"{n}: regeneration builds X1 on OUT5 (OR chain OUT1→OUT5). Set X1 to OUT5.")
+                    else:
+                        add("info", f"{n}: X1 train = OUT{self.chain_channels(c)[0]}…OUT5 OR-combined (OUT1 is internal).")
+                if abs(self.cab2 - self.cab1) > 0.5:
+                    add("warn", f"{n}: X1/X2 cables differ by {fmt_ns(abs(self.cab2-self.cab1))}. Use equal lengths.")
+            if off + self.sp_ddel.value() + self.tr_tf()[1] > P:
+                add("warn", f"{n}: HV pulse runs past one period ({fmt_ns(P)}) and overlaps the next one.")
+            to, tc = self.optical_window(c)
+            if to is None:
+                add("warn", f"{n}: cell never opens (HV {self.vcell():.2f} kV is below half of the full-open {self.sp_vfull.value():.2f} kV).")
+            else:
+                add("info", f"{n}: light gate opens at {fmt_ns(to)}, closes at {fmt_ns(tc)} (window {fmt_ns(tc-to)}).")
+        dup = sorted({o for o in used if used.count(o) > 1})
+        if dup:
+            add("err", "Output(s) " + ", ".join(f"OUT{o}" for o in dup) + " used twice. Each X input needs its own TG10 output.")
+        vr, V, Vf = self.sp_rail.value(), self.vcell(), self.sp_vfull.value()
+        um = 1.4 if self.cb_umax.currentIndex() == 0 else 2.5
+        if vr > um + 1e-9:
+            add("err", f"Rail ±{vr:.2f} kV is above the HVS-100 option Umax ±{um} kV.")
+        elif vr < 0.4 * um - 1e-9:
+            add("err", f"Rail ±{vr:.2f} kV is below the HVS-100 control limit (40 % of Umax = {0.4*um:.2f} kV).")
+        else:
+            add("ok", f"Rail ±{vr:.2f} kV is inside the HVS-100 control range ({0.4*um:.2f}…{um} kV).")
+        if um > DRV["rail_kv"]:
+            add("warn", f"The ±{um} kV option can exceed the {DRV['name']} limit of ±{DRV['rail_kv']} kV. Tune the rail to ≤ {DRV['rail_kv']} kV.")
+        if vr > DRV["rail_kv"] + 1e-9:
+            add("err", f"Rail ±{vr:.2f} kV is above the driver maximum ±{DRV['rail_kv']} kV.")
+        if V < 0.98 * Vf:
+            add("warn", f"Cell voltage {V:.2f} kV is below full-open {Vf:.2f} kV: light only {self.transmission(V)*100:.0f} % at peak.")
+        elif V > 1.02 * Vf:
+            add("warn", f"Cell voltage {V:.2f} kV is above full-open {Vf:.2f} kV: over-driven.")
+        else:
+            add("ok", f"Cell voltage {V:.2f} kV ≈ full-open {Vf:.2f} kV.")
+        C = self.sp_cap.value()
+        if C < 4:
+            add("err", f"Load {C:.1f} pF is below 4 pF - driver must not run unloaded.")
+        elif C > 10:
+            add("warn", f"Load {C:.1f} pF is above 10 pF - derate voltage / rate.")
+        pw_ = f * C * 1e-12 * (V * 1e3) ** 2 * len(self.active_cells())
+        add("err" if pw_ > DRV["pmax"] else "ok", f"Estimated HV dissipation ≈ {pw_:.1f} W (driver limit ≈ {DRV['pmax']:.0f} W per driver).")
+        add("info", "Config 1 = idle (no HV pulse), Config 2 = fire. Set Output card: rise = DELx, fall = post DELx "
+                    "for X1; use 'Fill Output card' to do it.")
+        add("info", "Operate in this order: 24 V + HV on first, then RUN on the TG10. Stop RUN before powering down.")
+        return ck
+
+    # ---------------- refresh ----------------
+    def refresh(self, *_):
+        if self._busy:
+            return
+        self.period = self.sp_per.value()
+        c = self.cur_cell()
+        r1, f1, r2, f2 = self.edges(c)
+        on, off = self.hv_window(c)
+        to, tc = self.optical_window(c)
+        h = f"<b style='color:#0b4778'>Cell {self.sel+1} readout</b><br>"
+        h += (f"X1 = OUT{c['a']}: rise delay <b>{fmt_ns(r1)}</b> · fall delay <b>{fmt_ns(f1)}</b> · "
+              f"pulse width <b>{fmt_ns(f1-r1)}</b><br>")
+        if self.mode == 2:
+            h += (f"X2 = OUT{c['b']}: rise delay <b>{fmt_ns(r2)}</b> · fall delay <b>{fmt_ns(f2)}</b> · "
+                  f"pulse width <b>{fmt_ns(f2-r2)}</b><br>"
+                  f"Rising-edge difference X2 − X1 = <b>{fmt_ns(r2-r1)}</b> → HV ON time <b>{fmt_ns(off-on)}</b><br>")
+        if self.regen_n(c) > 1:
+            h += f"Regeneration: <b>{self.regen_n(c)}</b> X1 pulses every <b>{fmt_ns(self.sp_gap.value())}</b>, X2 once at the end.<br>"
+        h += (f"HV on cell: ON at <b>{fmt_ns(on+self.sp_ddel.value())}</b>, OFF at <b>{fmt_ns(off+self.sp_ddel.value())}</b> "
+              f"(driver delay ≈ {fmt_ns(self.sp_ddel.value())}) · "
+              f"light window <b>{fmt_ns(tc-to) if to is not None else '—'}</b>")
+        self.lab_read.setText(h)
+        ck = self.checks()
+        worst = "ok"
+        for s, _t in ck:
+            if s == "err":
+                worst = "err"
+            elif s == "warn" and worst != "err":
+                worst = "warn"
+        msg = {"ok": "READY - values are inside the driver limits", "warn": "CHECK - read the warnings below",
+               "err": "NOT SAFE - fix the red items before sending"}[worst]
+        self.lab_banner.setText(f"<b style='color:{SEV_COL[worst]}; font-size:14px'>{SEV_ICON[worst]} {msg}</b> "
+                                f"&nbsp;·&nbsp; {'X1 only' if self.mode == 1 else 'X1 + X2'} · {fmt_hz(1e9/self.period)} "
+                                f"· HV {self.vcell():.2f} kV")
+        self.lab_chk.setText("<br>".join(f"<span style='color:{SEV_COL[s]}'><b>{SEV_ICON[s]}</b> {t}</span>" for s, t in ck))
+        self._cursor_text()
+        self.scope.update()
+
+    # ---------------- hardware / main-window actions ----------------
+    def chain_channels(self, c):
+        """TG10 outputs that make X1. One output normally; with regeneration the OR chain …OUT4→OUT5 (ends at OUT5)."""
+        n = self.regen_n(c)
+        return [c["a"]] if n <= 1 else list(range(6 - min(n, 5), 6))
+
+    def _transfer_list(self):
+        """(output, rise_ns, post_width_ns, logic) for every TG10 output used."""
+        out = []
+        gap = self.sp_gap.value()
+        for c in self.active_cells():
+            if self.mode == 1:
+                out.append((c["a"], c["rise"], c["width"], "NA"))
+                continue
+            n = self.regen_n(c)
+            if n > 1:
+                for j, ch in enumerate(self.chain_channels(c)):
+                    out.append((ch, c["rise"] + j * gap, c["trig"], "NA" if j == 0 else "OR"))
+            else:
+                out.append((c["a"], c["rise"], c["trig"], "NA"))
+            out.append((c["b"], c["rise2"], c["trig"], "NA"))
+        return out
+
+    def _get_delay_dialog(self):
+        pw = self.pw
+        dd = getattr(pw, "delay_dialog", None)
+        if dd is None:
+            DelayDialog = getattr(sys.modules.get("__main__"), "DelayDialog", None)
+            if DelayDialog is None:
+                return None
+            dd = DelayDialog(pw)
+            pw.delay_dialog = dd
+        return dd
+
+    def read_from_tg10(self):
+        """Read DEL / post-DEL back from the TG10 (via the Delay presets dialog) and load them here."""
+        pw = self.pw
+        if pw is None or not getattr(pw, "connection_state", False):
+            QMessageBox.warning(self, "TG10", "TG10 is not connected.")
+            return
+        dd = self._get_delay_dialog()
+        if dd is None:
+            return
+        dd.load_delay_presets_from_hardware()
+        self.load_from_main(silent=False)
+        try:
+            pw.set_status("HV Pulse Studio: values read back from TG10")
+        except Exception:
+            pass
+
+    def _push_to_delay_dialog(self):
+        dd = self._get_delay_dialog()
+        if dd is None:
+            return
+        for ch, rise, width, _lg in self._transfer_list():
+            for fld, unit, val in ((dd.delay_fields[ch], dd.delay_units[ch], rise),
+                                   (dd.post_delay_fields[ch], dd.post_delay_units[ch], width)):
+                unit.setCurrentText("ns")
+                fld.setValue(val)
+
+    def _interlock_ok(self):
+        if self.ck_hv_ready.isChecked():
+            return True
+        QMessageBox.warning(self, "Interlock",
+                            "Tick the interlock box first: HVS-100 ON at the set voltage, 24 V ON, load connected.\n\n"
+                            "SYNC pulses must never reach the driver before HV and 24 V are up.")
+        return False
+
+    def send_to_tg10(self):
+        if not self._interlock_ok():
+            return
+        pw = self.pw
+        if pw is None or not getattr(pw, "connection_state", False) or getattr(pw, "serial_connection", None) is None:
+            QMessageBox.warning(self, "TG10", "TG10 is not connected. Use COM in the main window first.")
+            return
+        for c in self.active_cells():
+            n = self.regen_n(c)
+            if n > 1 and (n > 5 or c["a"] != 5):
+                QMessageBox.warning(self, "Pulse regeneration",
+                                    "Regeneration on the TG10 needs X1 = OUT5 and at most 5 pulses "
+                                    "(OUT1→OUT2→OUT3→OUT4→OUT5 OR chain).")
+                return
+        errs = [t for s, t in self.checks() if s == "err"]
+        if errs:
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Warning)
+            box.setWindowTitle("Driver limits violated")
+            box.setText("Driver limits are violated:\n\n" + "\n".join("✖ " + e for e in errs[:8]) +
+                        "\n\nSend anyway?")
+            box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+            box.setDefaultButton(QMessageBox.No)
+            if box.exec() != QMessageBox.Yes:
+                return
+        try:
+            self._push_to_delay_dialog()
+            for ch, rise, width, _lg in self._transfer_list():
+                f = self.fsys(ch)
+                seq = pw.operations.build_delay_channel(ch, rise * 1e-9, f)
+                pw.can_backend.send_sequence(pw.serial_connection, seq, label=f"DEL{ch} = {rise:.3f} ns")
+                pw.menu.update_current_config(seq)
+                seq, actual = pw.operations.build_post_delay_channel(ch, width * 1e-9, f)
+                pw.can_backend.send_sequence(pw.serial_connection, seq, label=f"POST DEL{ch}")
+                pw.menu.update_current_config(seq)
+            extra = ("\n\nRegeneration uses the OR chain OUT1→OUT5 (manual: up to 5 pulses). Confirm on a scope "
+                     "that OUT5 shows the full pulse train." if any(self.regen_n(c) > 1 for c in self.active_cells()) else "")
+            QMessageBox.information(self, "TG10", "DEL and post-DEL values sent. Output rise/fall conditions: "
+                                                  "use 'Send Output conditions' (or the Output card Set) so OUTx rise = DELx, fall = post DELx." + extra)
+            pw.set_status("HV Pulse Studio values sent to TG10")
+        except Exception as exc:
+            QMessageBox.critical(self, "Send failed", f"Could not program TG10:\n\n{exc}")
+
+    def fill_output_card(self, send=False):
+        """Fill the main-window Output card for every used output. send=True also writes it to the TG10."""
+        pw = self.pw
+        try:
+            if send:
+                if not self._interlock_ok():
+                    return
+                if not getattr(pw, "connection_state", False):
+                    QMessageBox.warning(self, "TG10", "TG10 is not connected.")
+                    return
+                if QMessageBox.question(
+                        self, "Send Output conditions",
+                        "This writes the Output rise/fall conditions to the TG10.\n"
+                        "The main-window Output Set uses command_on=True, so check what that does on your "
+                        "unit. Switch the HV and 24 V on BEFORE pulses can start.\n\nSend now?",
+                        QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
+                    return
+            for ch, _r, _w, lg in self._transfer_list():
+                pw.output_channel.setCurrentText(f"OUT{ch}")
+                pw.output_c1_rise.setCurrentText("No change")
+                pw.output_c1_fall.setCurrentText("Force reset")
+                pw.output_c2_rise.setCurrentText(f"DEL{ch}")
+                pw.output_c2_fall.setCurrentText(f"post DEL{ch}")
+                # Logic is NA except the OR chain used by pulse regeneration (blocked so the card does not reset it).
+                pw.output_logic.blockSignals(True)
+                pw.output_logic.setCurrentText(lg if ch in (2, 3, 4, 5) else "NA")
+                pw.output_logic.blockSignals(False)
+                if send:
+                    pw._set_output_hardware()
+                else:
+                    pw._commit_output_to_monitor()
+            pw.set_status("Output conditions " + ("sent to TG10" if send else "filled (not sent)")
+                          + ": Config 2 rise = DELx, fall = post DELx; Config 1 idle")
+        except Exception as exc:
+            QMessageBox.warning(self, "Output card", f"Could not fill the Output card: {exc}")
+
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    app.setStyle("Fusion")
+    w = PulseStudioDialog(None)
+    w.show()
+    sys.exit(app.exec())
