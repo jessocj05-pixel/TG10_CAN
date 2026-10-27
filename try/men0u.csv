@@ -1,0 +1,124 @@
+RegID,TreeID,TreeNode,TreeNodeIdx,RegType,Permissions_raw,NV,AdvancedMode,UserMode,ServiceMode,LowLimit,HighLimit,ShortName,Format,LongName
+16,0,0,0,u8,0x7F,True,3,3,3,0,1,Command,"[OFF,ON,FAULT]",Command
+20,10,0,10,u16,0x22,False,2,0,2,0,660,PhdBias,%.2fV,Photodiode bias
+23,11,0,11,u32,0x7F,True,3,3,3,2,2147483647,Tmin,%u,Trigger Tmin delay
+24,11,0,11,u32,0x7F,True,3,3,3,2,2147483647,Tmax,%u,Trigger Tmax delay
+105,11,0,11,u16,0x7F,True,3,3,3,1,65535,Fdiv,%u,F div
+106,11,0,11,u16,0x7F,True,3,3,3,1,32767,FdivAcq,%u,F div Acq
+107,11,0,11,u16,0x7F,True,3,3,3,0,4095,DAC1,%u,DAC1
+108,11,0,11,u16,0x7F,True,3,3,3,0,4095,DAC2,%u,DAC2
+126,11,0,11,u8,0x2A,False,2,2,2,0,1,PLL1locked,"[NOLOCK,LOCKOK]",PLL1 lock
+31,11,0,11,u8,0x2A,False,2,2,2,0,3,CLKvalid,"[NOCLOCK-NOLOCK,NOCLOCK-LOCKOK,CLOCKOK-NOLOCK,CLOCKOK-LOCKOK]",PLL2 clock and lock
+109,11,0,11,u8,0x7A,True,3,2,2,0,1,VCO,"[2.5GHz,3GHz]",VCO2 frequency
+110,11,0,11,s8,0x7A,True,3,2,2,-8,8,LagPLL,%d,LagPLL
+111,11,0,11,s8,0x30,False,3,0,0,0,18,LD2mux,"[Logic Low,PLL1 DLD,PLL2 DLD,PLL1 & PLL2 DLD,Holdover Status,DAC Locked,Reserved,SPI Readback,DAC Rail,DAC Low,DAC High,PLL1_N,PLL1_Ndiv2,PLL2_N,PLL2_N/2,PLL1_R,PLL1_Rdiv2,PLL2_R,PLL2_Rdiv2]",LD2mux
+112,11,0,11,s8,0x30,False,3,0,0,0,1,OSTrig,"[-,START]",One shot trigger
+113,11,0,11,s8,0x30,False,3,0,0,0,1,OSBurst,"[-,START]",One shot burst
+114,11,0,11,s8,0x30,False,3,0,0,0,1,OSLSET,"[-,START]",One shot latch set
+115,11,0,11,s8,0x30,False,3,0,0,0,1,OSLCLR,"[-,START]",One shot latch reset
+116,11,0,11,u32,0x7F,True,3,3,3,1,65535,BatchC,%u,Burst count
+255,64,4,0,u8,0x7F,True,3,3,3,255,255,,,LMK delay block
+86,65,4,1,u8,0x7F,True,3,3,3,0,23,Adly0,%u,A delay 0
+87,65,4,1,u8,0x7F,True,3,3,3,0,23,Adly1,%u,A delay 1
+88,65,4,1,u8,0x7F,True,3,3,3,0,23,Adly2,%u,A delay 2
+89,65,4,1,u8,0x7F,True,3,3,3,0,23,Adly3,%u,A delay 3
+90,65,4,1,u8,0x7F,True,3,3,3,0,23,Adly4,%u,A delay 4
+91,65,4,1,u8,0x7F,True,3,3,3,0,23,Adly5,%u,A delay 5
+92,65,4,1,u8,0x7F,True,3,3,3,0,23,Adly6,%u,A delay 6
+93,65,4,1,u8,0x7F,True,3,3,3,4,32,Ddly0,%u,D delay 0
+94,65,4,1,u8,0x7F,True,3,3,3,4,32,Ddly1,%u,D delay 1
+95,65,4,1,u8,0x7F,True,3,3,3,4,32,Ddly2,%u,D delay 2
+96,65,4,1,u8,0x7F,True,3,3,3,4,32,Ddly3,%u,D delay 3
+98,65,4,1,u8,0x7F,True,3,3,3,4,32,Ddly5,%u,D delay 5
+99,65,4,1,u8,0x7F,True,3,3,3,4,32,Ddly6,%u,D delay 6
+255,80,5,0,u8,0x7F,True,3,3,3,255,255,,,Delay counters
+128,91,5,11,u32,0x7B,True,3,2,3,3,16777218,DelayCnt0,%u,Delay counter 0
+22,91,5,11,u32,0x7B,True,3,2,3,3,16777218,DelayCnt1,%u,Delay counter 1
+25,91,5,11,u32,0x7B,True,3,2,3,3,16777218,DelayCnt2,%u,Delay counter 2
+26,91,5,11,u32,0x7B,True,3,2,3,3,16777218,DelayCnt3,%u,Delay counter 3
+27,91,5,11,u32,0x7B,True,3,2,3,3,16777218,DelayCnt4,%u,Delay counter 4
+28,91,5,11,u32,0x7B,True,3,2,3,3,16777218,DelayCnt5,%u,Delay counter 5
+29,91,5,11,u32,0x7B,True,3,2,3,3,16777218,DelayCnt6,%u,Delay counter 6
+30,91,5,11,u32,0x7B,True,3,2,3,3,16777218,DelayCnt7,%u,Delay counter 7
+38,91,5,11,u16,0x7B,True,3,2,3,3,258,PostCnt0,%u,Post delay counter 0
+39,91,5,11,u16,0x7B,True,3,2,3,3,258,PostCnt1,%u,Post delay counter 1
+40,91,5,11,u16,0x7B,True,3,2,3,3,258,PostCnt2,%u,Post delay counter 2
+41,91,5,11,u16,0x7B,True,3,2,3,3,258,PostCnt3,%u,Post delay counter 3
+42,91,5,11,u16,0x7B,True,3,2,3,3,258,PostCnt4,%u,Post delay counter 4
+43,91,5,11,u16,0x7B,True,3,2,3,3,258,PostCnt5,%u,Post delay counter 5
+44,91,5,11,u16,0x7B,True,3,2,3,3,258,PostCnt6,%u,Post delay counter 6
+45,91,5,11,u16,0x7B,True,3,2,3,3,258,PostCnt7,%u,Post delay counter 7
+255,16,1,0,u8,0x7F,True,3,3,3,255,255,,,Muxes
+46,59,3,11,u8,0x7F,True,3,3,3,0,15,MuxSetConf10,"[0,1,Post-count,Fine del0,Fine del1,Fine del2,Fine del3,Fine del4,Fine del5,Coarse del6,Coarse del7,Trigger,Latch SET,GATE,nGATE,Delayed res]","Mux set conf 1, block 0"
+47,59,3,11,u8,0x7F,True,3,3,3,0,15,MuxSetConf20,"[0,1,Post-count,Fine del0,Fine del1,Fine del2,Fine del3,Fine del4,Fine del5,Coarse del6,Coarse del7,Trigger,Latch SET,GATE,nGATE,Delayed res]","Mux set conf 2, block 0"
+48,59,3,11,u8,0x7F,True,3,3,3,0,15,MuxResConf10,"[0,1,Post-count,Fine del0,Fine del1,Fine del2,Fine del3,Fine del4,Fine del5,Coarse del6,Coarse del7,Trigger,Latch RES,GATE,nGATE,Delayed set]","Mux res conf 1, block 0"
+49,59,3,11,u8,0x7F,True,3,3,3,0,15,MuxResConf20,"[0,1,Post-count,Fine del0,Fine del1,Fine del2,Fine del3,Fine del4,Fine del5,Coarse del6,Coarse del7,Trigger,Latch RES,GATE,nGATE,Delayed set]","Mux res conf 2, block 0"
+50,59,3,11,u8,0x7F,True,3,3,3,0,15,MuxSetConf11,"[0,1,Post-count,Fine del0,Fine del1,Fine del2,Fine del3,Fine del4,Fine del5,Coarse del6,Coarse del7,Trigger,Latch SET,GATE,nGATE,Delayed res]","Mux set conf 1, block 1"
+51,59,3,11,u8,0x7F,True,3,3,3,0,15,MuxSetConf21,"[0,1,Post-count,Fine del0,Fine del1,Fine del2,Fine del3,Fine del4,Fine del5,Coarse del6,Coarse del7,Trigger,Latch SET,GATE,nGATE,Delayed res]","Mux set conf 2, block 1"
+52,59,3,11,u8,0x7F,True,3,3,3,0,15,MuxResConf11,"[0,1,Post-count,Fine del0,Fine del1,Fine del2,Fine del3,Fine del4,Fine del5,Coarse del6,Coarse del7,Trigger,Latch RES,GATE,nGATE,Delayed set]","Mux res conf 1, block 1"
+53,59,3,11,u8,0x7F,True,3,3,3,0,15,MuxResConf21,"[0,1,Post-count,Fine del0,Fine del1,Fine del2,Fine del3,Fine del4,Fine del5,Coarse del6,Coarse del7,Trigger,Latch RES,GATE,nGATE,Delayed set]","Mux res conf 2, block 1"
+54,59,3,11,u8,0x7F,True,3,3,3,0,15,MuxSetConf12,"[0,1,Post-count,Fine del0,Fine del1,Fine del2,Fine del3,Fine del4,Fine del5,Coarse del6,Coarse del7,Trigger,Latch SET,GATE,nGATE,Delayed res]","Mux set conf 1, block 2"
+55,59,3,11,u8,0x7F,True,3,3,3,0,15,MuxSetConf22,"[0,1,Post-count,Fine del0,Fine del1,Fine del2,Fine del3,Fine del4,Fine del5,Coarse del6,Coarse del7,Trigger,Latch SET,GATE,nGATE,Delayed res]","Mux set conf 2, block 2"
+56,59,3,11,u8,0x7F,True,3,3,3,0,15,MuxResConf12,"[0,1,Post-count,Fine del0,Fine del1,Fine del2,Fine del3,Fine del4,Fine del5,Coarse del6,Coarse del7,Trigger,Latch RES,GATE,nGATE,Delayed set]","Mux res conf 1, block 2"
+57,59,3,11,u8,0x7F,True,3,3,3,0,15,MuxResConf22,"[0,1,Post-count,Fine del0,Fine del1,Fine del2,Fine del3,Fine del4,Fine del5,Coarse del6,Coarse del7,Trigger,Latch RES,GATE,nGATE,Delayed set]","Mux res conf 2, block 2"
+58,59,3,11,u8,0x7F,True,3,3,3,0,15,MuxSetConf13,"[0,1,Post-count,Fine del0,Fine del1,Fine del2,Fine del3,Fine del4,Fine del5,Coarse del6,Coarse del7,Trigger,Latch SET,GATE,nGATE,Delayed res]","Mux set conf 1, block 3"
+59,59,3,11,u8,0x7F,True,3,3,3,0,15,MuxSetConf23,"[0,1,Post-count,Fine del0,Fine del1,Fine del2,Fine del3,Fine del4,Fine del5,Coarse del6,Coarse del7,Trigger,Latch SET,GATE,nGATE,Delayed res]","Mux set conf 2, block 3"
+60,59,3,11,u8,0x7F,True,3,3,3,0,15,MuxResConf13,"[0,1,Post-count,Fine del0,Fine del1,Fine del2,Fine del3,Fine del4,Fine del5,Coarse del6,Coarse del7,Trigger,Latch RES,GATE,nGATE,Delayed set]","Mux res conf 1, block 3"
+61,59,3,11,u8,0x7F,True,3,3,3,0,15,MuxResConf23,"[0,1,Post-count,Fine del0,Fine del1,Fine del2,Fine del3,Fine del4,Fine del5,Coarse del6,Coarse del7,Trigger,Latch RES,GATE,nGATE,Delayed set]","Mux res conf 2, block 3"
+62,59,3,11,u8,0x7F,True,3,3,3,0,15,MuxSetConf14,"[0,1,Post-count,Fine del0,Fine del1,Fine del2,Fine del3,Fine del4,Fine del5,Coarse del6,Coarse del7,Trigger,Latch SET,GATE,nGATE,Delayed res]","Mux set conf 1, block 4"
+63,59,3,11,u8,0x7F,True,3,3,3,0,15,MuxSetConf24,"[0,1,Post-count,Fine del0,Fine del1,Fine del2,Fine del3,Fine del4,Fine del5,Coarse del6,Coarse del7,Trigger,Latch SET,GATE,nGATE,Delayed res]","Mux set conf 2, block 4"
+64,59,3,11,u8,0x7F,True,3,3,3,0,15,MuxResConf14,"[0,1,Post-count,Fine del0,Fine del1,Fine del2,Fine del3,Fine del4,Fine del5,Coarse del6,Coarse del7,Trigger,Latch RES,GATE,nGATE,Delayed set]","Mux res conf 1, block 4"
+65,59,3,11,u8,0x7F,True,3,3,3,0,15,MuxResConf24,"[0,1,Post-count,Fine del0,Fine del1,Fine del2,Fine del3,Fine del4,Fine del5,Coarse del6,Coarse del7,Trigger,Latch RES,GATE,nGATE,Delayed set]","Mux res conf 2, block 4"
+66,59,3,11,u8,0x7F,True,3,3,3,0,15,MuxSetConf15,"[0,1,Post-count,Fine del0,Fine del1,Fine del2,Fine del3,Fine del4,Fine del5,Coarse del6,Coarse del7,Trigger,Latch SET,GATE,nGATE,Delayed res]","Mux set conf 1, block 5"
+67,59,3,11,u8,0x7F,True,3,3,3,0,15,MuxSetConf25,"[0,1,Post-count,Fine del0,Fine del1,Fine del2,Fine del3,Fine del4,Fine del5,Coarse del6,Coarse del7,Trigger,Latch SET,GATE,nGATE,Delayed res]","Mux set conf 2, block 5"
+68,59,3,11,u8,0x7F,True,3,3,3,0,15,MuxResConf15,"[0,1,Post-count,Fine del0,Fine del1,Fine del2,Fine del3,Fine del4,Fine del5,Coarse del6,Coarse del7,Trigger,Latch RES,GATE,nGATE,Delayed set]","Mux res conf 1, block 5"
+69,59,3,11,u8,0x7F,True,3,3,3,0,15,MuxResConf25,"[0,1,Post-count,Fine del0,Fine del1,Fine del2,Fine del3,Fine del4,Fine del5,Coarse del6,Coarse del7,Trigger,Latch RES,GATE,nGATE,Delayed set]","Mux res conf 2, block 5"
+70,59,3,11,u8,0x7F,True,3,3,3,0,15,MuxSetConf16,"[0,1,Post-count,Fine del0,Fine del1,Fine del2,Fine del3,Fine del4,Fine del5,Coarse del6,Coarse del7,Trigger,Latch SET,GATE,nGATE,Delayed res]","Mux set conf 1, block 6"
+71,59,3,11,u8,0x7F,True,3,3,3,0,15,MuxSetConf26,"[0,1,Post-count,Fine del0,Fine del1,Fine del2,Fine del3,Fine del4,Fine del5,Coarse del6,Coarse del7,Trigger,Latch SET,GATE,nGATE,Delayed res]","Mux set conf 2, block 6"
+72,59,3,11,u8,0x7F,True,3,3,3,0,15,MuxResConf16,"[0,1,Post-count,Fine del0,Fine del1,Fine del2,Fine del3,Fine del4,Fine del5,Coarse del6,Coarse del7,Trigger,Latch RES,GATE,nGATE,Delayed set]","Mux res conf 1, block 6"
+73,59,3,11,u8,0x7F,True,3,3,3,0,15,MuxResConf26,"[0,1,Post-count,Fine del0,Fine del1,Fine del2,Fine del3,Fine del4,Fine del5,Coarse del6,Coarse del7,Trigger,Latch RES,GATE,nGATE,Delayed set]","Mux res conf 2, block 6"
+74,59,3,11,u8,0x7F,True,3,3,3,0,15,MuxSetConf17,"[0,1,Post-count,Fine del0,Fine del1,Fine del2,Fine del3,Fine del4,Fine del5,Coarse del6,Coarse del7,Trigger,Latch SET,GATE,nGATE,Delayed res]","Mux set conf 1, block 7"
+75,59,3,11,u8,0x7F,True,3,3,3,0,15,MuxSetConf27,"[0,1,Post-count,Fine del0,Fine del1,Fine del2,Fine del3,Fine del4,Fine del5,Coarse del6,Coarse del7,Trigger,Latch SET,GATE,nGATE,Delayed res]","Mux set conf 2, block 7"
+76,59,3,11,u8,0x7F,True,3,3,3,0,15,MuxResConf17,"[0,1,Post-count,Fine del0,Fine del1,Fine del2,Fine del3,Fine del4,Fine del5,Coarse del6,Coarse del7,Trigger,Latch RES,GATE,nGATE,Delayed set]","Mux res conf 1, block 7"
+77,59,3,11,u8,0x7F,True,3,3,3,0,15,MuxResConf27,"[0,1,Post-count,Fine del0,Fine del1,Fine del2,Fine del3,Fine del4,Fine del5,Coarse del6,Coarse del7,Trigger,Latch RES,GATE,nGATE,Delayed set]","Mux res conf 2, block 7"
+122,59,3,11,u8,0x7F,True,3,3,3,0,3,MuxOut2,"[lOUT2,lOUT2 and OUT1,lOUT2 or OUT1,not OUT1]",OUT2 mux
+123,59,3,11,u8,0x7F,True,3,3,3,0,3,MuxOut3,"[lOUT3,lOUT3 and OUT2,lOUT3 or OUT2,not OUT2]",OUT3 mux
+124,59,3,11,u8,0x7F,True,3,3,3,0,3,MuxOut4,"[lOUT4,lOUT4 and OUT3,lOUT4 or OUT3,not OUT3]",OUT4 mux
+125,59,3,11,u8,0x7F,True,3,3,3,0,3,MuxOut5,"[lOUT5,lOUT5 and OUT4,lOUT5 or OUT4,not OUT4]",OUT5 mux
+78,59,3,11,u8,0x7F,True,3,3,3,0,15,MuxTrg1Out,"[nbOUT0,nbOUT1,nbOUT2,nbOUT3,nbOUT4,nbOUT5,nbOUT6,nbOUT7,OPTCLK,OPCLK div 2,t1,t2,t3,t4,t5,t6]",Mux TRIG1 OUT
+79,59,3,11,u8,0x7F,True,3,3,3,0,10,MuxPreT,"[nbOUT0,nbOUT1,nbOUT2,nbOUT3,nbOUT4,nbOUT5,nbOUT6,nbOUT7,OPTCLK,OPCLK div 2,OPTCLK multipler]",Mux PRET OUT
+129,59,3,11,u8,0x7F,True,3,3,3,0,1,x200mux,"[x4,x5]",OPTCLK multiplier for Mux PRET OUT
+80,59,3,11,u8,0x7F,True,3,3,3,0,9,MuxDAC,"[GATE,nGATE,GATE and SYNCIN1,Conf switch,nbOUT4,nbOUT5,nbOUT6,nbOUT7,AWG,AWG@OPTCLK]",Mux DAC CS
+81,59,3,11,u8,0x7F,True,3,3,3,0,7,MuxACQ,"[nbOUT0,nbOUT1,nbOUT2,nbOUT3,nbOUT4,nbOUT5,nbOUT6,nbOUT7]",Mux ACQ out
+82,59,3,11,u8,0x7F,True,3,3,3,0,7,MuxConfSw,"[0,1,Burst,nBurst,F div,GATE,nGATE,GATE and SYNCIN1]",Mux Conf switch
+83,59,3,11,u8,0x7F,True,3,3,3,0,3,MuxBurstT,"[SYNCIN,GATE,nGATE,One shot burst]",Mux Burst trigger
+84,59,3,11,u8,0x7F,True,3,3,3,0,5,MuxStartTrg,"[Rate divider,Rate div@OPTCLK,SYNCIN,SYNCIN@OPTCLK,One shot trig,One shot smart]",Mux Trigger
+85,59,3,11,u8,0x7F,True,3,3,3,0,3,MuxRateClk,"[Internal,OPTCLK,OPTCLKdiv2,SYNCIN]",Mux Rate divider source
+32,11,0,11,u32,0x7A,True,3,2,2,1,2147483647,Ratediv,%u,Rate divider
+18,11,0,11,u32,0x7F,True,3,3,3,1,18000,Ndiv,%u,PLL2 N divider
+255,16,1,0,u8,0x7F,True,3,3,3,255,255,,,Setup
+117,17,1,1,u8,0x73,True,3,0,3,0,1,OscClkMux,"[Internal 100Mhz,External]",Optical clock mux
+17,17,1,1,u8,0x73,True,3,0,3,10,100,OscClock,%uMHz,Oscilator clock
+34,17,1,1,u8,0x73,True,3,0,3,0,1,SyncRPhase,%u,/SYNC Phase
+101,17,1,1,u8,0x70,True,3,0,0,0,1,FltTmin,"[OFF,ON]",Fault on T<Tmin
+102,17,1,1,u8,0x70,True,3,0,0,0,1,FltTmax,"[OFF,ON]",Fault on T>Tmax
+103,17,1,1,u8,0x70,True,3,0,0,0,1,LimTmin,"[OFF,ON]",Limit to T<Tmin
+104,17,1,1,u8,0x70,True,3,0,0,0,1,LimTmax,"[OFF,ON]",Limit to T>Tmax
+127,17,1,1,u8,0x70,True,3,0,0,0,1,NoBurstSync,"[OFF,ON]",Disable trig-synchronous burst
+255,96,6,0,u8,0x7F,True,3,3,3,255,255,,,Counters
+118,17,1,1,u32,0x2A,False,2,2,2,0,0,OscInF,%.2fkHz,CLK IN frequency
+119,17,1,1,u32,0x2A,False,2,2,2,0,0,SYNCINF,%.2fkHz,SYNC IN frequency
+120,17,1,1,u32,0x2A,False,2,2,2,0,0,SYNCINP,%u 10ns,SYNC IN period
+121,17,1,1,u32,0x2A,False,2,2,2,0,0,SYNCIN1DL,%u 10ns,SYNCIN1 delay
+21,17,1,1,u32,0x2A,False,2,2,2,0,0,OptClk,%uHz,PLL2 frequency
+255,112,7,0,u8,0x7F,True,3,3,3,255,255,,,AWG
+134,113,7,1,u8,0x73,True,3,0,3,0,3,AWGdivmux,"[/1,/2,/4,/8]",AWG rate clock divider
+132,113,7,1,u16,0x33,False,3,0,3,0,2047,WADR,%u,Write address
+133,113,7,1,u16,0x33,False,3,0,3,0,4095,WD,%u,Write data
+255,32,2,0,u8,0x7F,True,3,3,3,255,255,,,CPLD version
+35,35,2,3,string8,0x2A,False,2,2,2,0,0,��������CPLDVer0,%s,CPLD Version string
+36,35,2,3,u32,0x2A,False,2,2,2,0,4294967295,CPLDVer1,%u,CPLD Version number
+37,35,2,3,u32,0x2A,False,2,2,2,0,4294967295,CPLDate,%u,CPLD date code
+100,14,0,14,u32,0x22,False,2,0,2,0,0,LMKid,%0x,LMK id ID_PROD:ID_MASKREV
+33,14,0,14,u8,0x30,False,3,0,0,0,1,Calibrate,%u,Trigger calibrate LMK
+9,15,0,15,u32,0x2A,False,2,2,2,0,4294967295,Version,%06u,Firmware SY4000
