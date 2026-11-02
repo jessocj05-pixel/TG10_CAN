@@ -44,6 +44,9 @@ RADIO_CHECKED = os.path.join(
 ).replace("\\", "/")
 
 
+import re
+
+
 # ============================================================
 # TG10 TEST01 MONITOR BACKEND PATH
 # ============================================================
@@ -4597,7 +4600,7 @@ class TG10Window(QMainWindow):
                     f"Invalid output logic value: {logic_mux}"
                 )
 
-
+            self._write_output_delays()
             sequence = self.operations.seq_out_config_del(
                 channel,
                 set1_src=set1_src,
@@ -4607,6 +4610,7 @@ class TG10Window(QMainWindow):
                 logic_mux=logic_mux,
                 command_on=False,
             )
+            self._output_condition_changed()   # show the value the device actually programmed
 
             # 7. Send using the existing CAN backend.
             if not hasattr(self, "can_backend"):
@@ -5370,7 +5374,7 @@ class TG10Window(QMainWindow):
         c1_grid.addWidget(self.output_c1_rise, 0, 1)
 
         self.output_c1_rise_delay = QLineEdit()
-        self.output_c1_rise_delay.setReadOnly(True)
+        # self.output_c1_rise_delay.setReadOnly(True)
         self.output_c1_rise_delay.setFixedWidth(105)
         self.output_c1_rise_delay.setFixedHeight(28)
         self.output_c1_rise_delay.setPlaceholderText("Delay")
@@ -5388,7 +5392,7 @@ class TG10Window(QMainWindow):
         c1_grid.addWidget(self.output_c1_fall, 1, 1)
 
         self.output_c1_fall_delay = QLineEdit()
-        self.output_c1_fall_delay.setReadOnly(True)
+        # self.output_c1_fall_delay.setReadOnly(True)
         self.output_c1_fall_delay.setFixedWidth(105)
         self.output_c1_fall_delay.setFixedHeight(28)
         self.output_c1_fall_delay.setPlaceholderText("Delay")
@@ -5420,7 +5424,7 @@ class TG10Window(QMainWindow):
         c2_grid.addWidget(self.output_c2_rise, 0, 1)
         
         self.output_c2_rise_delay = QLineEdit()
-        self.output_c2_rise_delay.setReadOnly(True)
+        # self.output_c2_rise_delay.setReadOnly(True)
         self.output_c2_rise_delay.setFixedWidth(105)
         self.output_c2_rise_delay.setFixedHeight(28)
         self.output_c2_rise_delay.setPlaceholderText("Delay")
@@ -5433,7 +5437,7 @@ class TG10Window(QMainWindow):
         c2_grid.addWidget(self.output_c2_fall, 1, 1)
         
         self.output_c2_fall_delay = QLineEdit()
-        self.output_c2_fall_delay.setReadOnly(True)
+        # self.output_c2_fall_delay.setReadOnly(True)
         self.output_c2_fall_delay.setFixedWidth(105)
         self.output_c2_fall_delay.setFixedHeight(28)
         self.output_c2_fall_delay.setPlaceholderText("Delay")
@@ -5658,7 +5662,10 @@ class TG10Window(QMainWindow):
                     display.setText("---")
                     continue
 
-                display.setText(self._format_output_delay(seconds))
+                # display.setText(self._format_output_delay(seconds))
+                txt = self._format_output_delay(seconds)
+                display.setText(txt)
+                display.setProperty("hw_text", txt)   # value as read from device
                 values[id(selector)] = seconds
                 
             except Exception as exc:
@@ -5748,6 +5755,58 @@ class TG10Window(QMainWindow):
             return f"{seconds / 1e-3:.3f} ms"
 
         return f"{seconds:.9f} s"
+
+    @staticmethod
+    def _parse_delay_text(text):
+        m = re.fullmatch(
+            r"\s*([0-9]*\.?[0-9]+(?:[eE][-+]?\d+)?)\s*(ps|ns|µs|μs|us|ms|s)?\s*",
+            text,
+        )
+        if not m:
+            raise ValueError(f"Bad delay value: {text!r}. Use e.g. 100 ns")
+        scale = {"ps": 1e-12, "ns": 1e-9, "µs": 1e-6, "μs": 1e-6,
+                "us": 1e-6, "ms": 1e-3, "s": 1.0}
+        return float(m.group(1)) * scale[m.group(2) or "ns"]
+
+    def _write_output_delays(self):
+        """Write edited delay boxes to TG10. Return True if anything was sent."""
+        f_hz = self.get_system_clock_hz()
+        jobs = {}
+
+        for selector, display in (
+            (self.output_c1_rise, self.output_c1_rise_delay),
+            (self.output_c1_fall, self.output_c1_fall_delay),
+            (self.output_c2_rise, self.output_c2_rise_delay),
+            (self.output_c2_fall, self.output_c2_fall_delay),
+        ):
+            cond = selector.currentText().strip()
+            text = display.text().strip()
+            if text in ("", "---", "--") or text == display.property("hw_text"):
+                continue                      # not edited
+
+            if cond.startswith("post DEL"):
+                key = ("post", int(cond[len("post DEL"):]))
+            elif cond.startswith("DEL"):
+                key = ("del", int(cond[3:]))
+            else:
+                continue
+
+            seconds = self._parse_delay_text(text)
+            if key in jobs and abs(jobs[key] - seconds) > 1e-15:
+                raise ValueError(f"{cond} entered twice with different values.")
+            jobs[key] = seconds
+
+        for (kind, ch), seconds in jobs.items():
+            if kind == "del":
+                seq = self.operations.build_delay_channel(ch, seconds, f_hz)
+                lbl = f"DEL{ch} = {self._format_output_delay(seconds)}"
+            else:
+                seq, _actual = self.operations.build_post_delay_channel(ch, seconds, f_hz)
+                lbl = f"post DEL{ch} = {self._format_output_delay(seconds)}"
+            self.can_backend.send_sequence(self.serial_connection, seq, label=lbl)
+            self.menu.update_current_config(seq)
+
+        return bool(jobs)
 
 
     
