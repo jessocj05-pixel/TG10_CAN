@@ -5547,7 +5547,68 @@ class TG10Window(QMainWindow):
         self._refresh_output_condition_options(channel)
         self._update_output_logic_options()
         self._update_output_condition_controls()
+        self._apply_output_readback_to_card()
 
+    @staticmethod
+    def _output_text_to_condition(text, block):
+        t = str(text).split(" (")[0].strip()
+        low = t.lower()
+        if low == "nc":
+            return "No change"
+        if low == "post-count":
+            return f"post DEL{block}"
+        if low.startswith(("fine del", "coarse del")):
+            return f"DEL{t[-1]}"
+        return {
+            "force set": "Force set",
+            "force reset": "Force reset",
+            "trigger": "Trigger",
+            "latch set": "Latch set",
+            "latch res": "Latch reset",
+            "gate": "GATE",
+            "ngate": "nGATE",
+            "delayed set": "Delayed set",
+            "delayed res": "Delayed reset",
+        }.get(low)
+
+    def _apply_output_readback_to_card(self, output_data=None):
+        if output_data is not None:
+            self._last_output_data = output_data
+        output_data = getattr(self, "_last_output_data", None)
+        if not isinstance(output_data, dict):
+            return
+
+        channel = self.output_channel.currentText()
+        if not channel.startswith("OUT"):
+            return
+        block = int(channel[3:])
+        entry = output_data.get(block)
+        if not entry:
+            return
+
+        self._refresh_output_condition_options(channel)
+
+        for widget, text in (
+            (self.output_c1_rise, entry["conf1"]["rise"]),
+            (self.output_c1_fall, entry["conf1"]["fall"]),
+            (self.output_c2_rise, entry["conf2"]["rise"]),
+            (self.output_c2_fall, entry["conf2"]["fall"]),
+        ):
+            cond = self._output_text_to_condition(text, block)
+            if cond and widget.findText(cond) >= 0:
+                widget.blockSignals(True)
+                widget.setCurrentText(cond)
+                widget.blockSignals(False)
+
+        lo = entry.get("logic_out")
+        if lo:
+            self.output_logic.blockSignals(True)
+            self.output_logic.setCurrentText(["NA", "AND", "OR", "NOT"][lo["raw"]])
+            self.output_logic.blockSignals(False)
+
+        self._output_condition_changed()   # refresh delay boxes + pulse width
+
+    
     def _update_output_condition_controls(self):
         if not hasattr(self, "output_channel"):
             return
@@ -6452,6 +6513,7 @@ class TG10Window(QMainWindow):
             self._update_monitor_output_table(
                 data["output_data"]
             )
+            self._apply_output_readback_to_card(data["output_data"])
         else:
             print(
                 f"[MONITOR] Output table read failed: "
