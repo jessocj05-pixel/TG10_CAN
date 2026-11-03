@@ -2262,7 +2262,6 @@ class SavePresetsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.parent_window = parent
-
         self.setWindowTitle("Save Presets")
         self.setFixedSize(520, 250)
 
@@ -2425,17 +2424,22 @@ class SavePresetsDialog(QDialog):
                 )
                 return
 
-            
-            with open(preset_path, "a", encoding="utf-8") as file:
-                file.write(f"\n\n{name} = [\n")
+            parent =self.parent_window
+            parent.start_action_progress(f"Saving Preset : {name}...")
 
-                for reg, data in sequence:
-                    payload = self._format_preset_payload(data)
-                    file.write(
-                        f"    (0x{reg:02X}, {payload}),\n"
-                    )
+            try:
+                with open(preset_path, "a", encoding="utf-8") as file:
+                    file.write(f"\n\n{name} = [\n")
 
-                file.write("]\n")
+                    for reg, data in sequence:
+                        payload = self._format_preset_payload(data)
+                        file.write(
+                            f"    (0x{reg:02X}, {payload}),\n"
+                        )
+
+                    file.write("]\n")
+            finally:
+                parent.finish_action_progress()
 
 
             QMessageBox.information(
@@ -2841,12 +2845,16 @@ class LoadPresetsDialog(QDialog):
                     raise ValueError(
                         f"Register 0x{reg:02X} has an invalid payload."
                     )
+            parent.start_action_progress(f"Loading preset: {name}...")
 
-            parent.can_backend.send_sequence(
-                parent.serial_connection,
-                sequence,
-                label=f"TG10 Preset: {name}"
-            )
+            try:
+                parent.can_backend.send_sequence(
+                    parent.serial_connection,
+                    sequence,
+                    label=f"TG10 Preset: {name}"
+                )
+            finally:
+                parent.finish_action_progress()
 
             parent.menu.state["current_config"] = {
                 reg: data
@@ -7172,6 +7180,9 @@ class TG10Window(QMainWindow):
             "Ready   |   Not connected",
             "StatusText"
         )
+        self.status.setStyleSheet("""
+            color: #16A34A;
+        """)
         # h.addWidget(self.status)
         h.addWidget(self.status, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
@@ -7179,7 +7190,7 @@ class TG10Window(QMainWindow):
         self.status_progress = QProgressBar()
         self.status_progress.setObjectName("StatusProgress")
         
-        self.status_progress.setFixedSize(290, 8)
+        self.status_progress.setFixedSize(180, 8)
         self.status_progress.setTextVisible(False)
         self.status_progress.setRange(0, 0)
         self.status_progress.setStyleSheet("""
@@ -7196,8 +7207,8 @@ class TG10Window(QMainWindow):
         self.status_progress.hide()
 
         # h.addWidget(self.status_progress)
-        h.addStretch(10)
-        h.addWidget(self.status_progress, 0, Qt.AlignmentFlag.AlignCenter)
+        # h.addStretch(3)
+        h.addWidget(self.status_progress)
         h.addStretch(1)
         h.addWidget(label("TG10 GUI v1.0", "StatusRight"))        
 
